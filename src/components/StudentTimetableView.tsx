@@ -57,15 +57,17 @@ function formatTimeSlot(start?: string, end?: string): string {
 }
 
 // Time slots 7 AM–6 PM (columns on top). Break/special only from academic settings (special_events).
+// Display format: 8:00-9:00am (AM/PM only once, at the end, lowercase).
 const STANDARD_TIME_SLOTS: string[] = (() => {
   const slots: string[] = [];
   for (let h = 7; h <= 17; h++) {
     const end = h + 1;
     const h12Start = h === 12 ? 12 : h > 12 ? h - 12 : h;
     const h12End = end === 12 ? 12 : end > 12 ? end - 12 : end;
-    const ampmStart = h < 12 ? 'AM' : 'PM';
-    const ampmEnd = end < 12 ? 'AM' : 'PM';
-    slots.push(`${h12Start}:00 ${ampmStart} - ${h12End}:00 ${ampmEnd}`);
+    const ampmEnd = end < 12 ? 'am' : 'pm';
+    const startLabel = `${h12Start}:00`;
+    const endLabel = `${h12End}:00`;
+    slots.push(`${startLabel}-${endLabel}${ampmEnd}`);
   }
   return slots;
 })();
@@ -163,7 +165,7 @@ export function StudentTimetableView({
     | { type: 'special'; label: string }
     | { type: 'empty' };
 
-  const is12To1Slot = (idx: number) => idx === 5 || STANDARD_TIME_SLOTS[idx] === '12:00 PM - 1:00 PM';
+  const is12To1Slot = (idx: number) => idx === 5;
 
   const getCellForSlot = (day: string, slotIndex: number): CellInfo => {
     const slotTime = STANDARD_TIME_SLOTS[slotIndex];
@@ -254,7 +256,7 @@ export function StudentTimetableView({
       doc.text('SCHOOL OF COMPUTING TIMETABLE', pageW / 2, 10, { align: 'center' });
       doc.setFontSize(9);
       doc.setFont('helvetica', 'normal');
-      doc.text('School of Computing Timetable System | Babcock University Computing Club', pageW / 2, 17, { align: 'center' });
+      doc.text('School of Computing Timetable System', pageW / 2, 17, { align: 'center' });
 
       doc.setTextColor(15, 32, 68);
       doc.setFontSize(10);
@@ -345,7 +347,7 @@ export function StudentTimetableView({
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
           <div className="flex flex-col items-center text-center">
             <h1 className="text-xl sm:text-2xl font-bold text-white uppercase tracking-wide">
-              School of Computing Timetable{group ? ` — Group ${group}` : ''}
+              School of Computing Timetable
             </h1>
             <p className="text-sm sm:text-base text-white font-normal mt-1.5">
               School of Computing Timetable System
@@ -455,9 +457,9 @@ export function StudentTimetableView({
               <CardHeader className="bg-[#0f2044] border-b-0 flex flex-col items-center justify-center text-center py-5">
                 <CardTitle className="text-[#ffb71b] font-bold text-xl sm:text-2xl flex items-center gap-2">
                   <img src="/bucc-logo-raw.png" alt="School of Computing" className="size-6 object-contain" />
-                  BUCC Timetable
+                  School of Computing Timetable
                 </CardTitle>
-                <p className="text-white font-semibold text-sm sm:text-base mt-1.5">Babcock University Computing Club</p>
+                <p className="text-white font-semibold text-sm sm:text-base mt-1.5">School of Computing</p>
               </CardHeader>
               <CardContent className="p-0">
                 <div className="overflow-x-auto">

@@ -7,7 +7,6 @@ import {
 import { useEffect, useState } from 'react';
 import Api from '../services/api';
 import { StudentTimetableView } from './StudentTimetableView';
-import TimetableSearch from './TimetableSearch';
 import { Button } from './ui/button';
 import { Card } from './ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
@@ -22,7 +21,9 @@ export function StudentLandingPage({ onOfficerLoginClick }: { onOfficerLoginClic
   const [selectedLevel, setSelectedLevel] = useState('');
   const [selectedGroup, setSelectedGroup] = useState('');
   const [showTimetable, setShowTimetable] = useState(false);
-  const [searchView, setSearchView] = useState<'classic' | 'advanced'>('classic');
+  const [resolvedSessionId, setResolvedSessionId] = useState<number | null>(null);
+  const [resolvedClassGroupId, setResolvedClassGroupId] = useState<number | null>(null);
+  const [resolvingIds, setResolvingIds] = useState(false);
 
   // Reset group when level changes
   const handleLevelChange = (level: string) => {
@@ -43,6 +44,9 @@ export function StudentLandingPage({ onOfficerLoginClick }: { onOfficerLoginClic
 
   const handleBackToSearch = () => {
     setShowTimetable(false);
+    setResolvedSessionId(null);
+    setResolvedClassGroupId(null);
+    setResolvingIds(false);
   };
 
   const formatStatusLabel = (status: string) => {
@@ -97,8 +101,68 @@ export function StudentLandingPage({ onOfficerLoginClick }: { onOfficerLoginClic
     fetchActiveDepartments();
   }, []);
 
-  // If viewing timetable, show the timetable view
+  // Resolve sessionId and classGroupId when viewing timetable (so the timetable can load)
+  useEffect(() => {
+    if (!showTimetable || !selectedSession || !selectedCourse || !selectedLevel || !selectedGroup) {
+      return;
+    }
+    let cancelled = false;
+    setResolvingIds(true);
+    (async () => {
+      try {
+        const session = allSessions.find((s: { name: string }) => s.name === selectedSession);
+        const sessionId = session?.session_id ?? null;
+        if (!sessionId || cancelled) {
+          setResolvedSessionId(null);
+          setResolvedClassGroupId(null);
+          setResolvingIds(false);
+          return;
+        }
+        const levelNum = parseInt(selectedLevel, 10);
+        const res = await Api.getClassGroups({
+          session_id: sessionId,
+          department: selectedCourse,
+          level: levelNum,
+          status: 'active'
+        });
+        if (cancelled) {
+          setResolvingIds(false);
+          return;
+        }
+        const list = (res?.success && Array.isArray(res?.data)) ? res.data : [];
+        const groupName = selectedGroup.replace(/^Group\s+/i, '').trim() || selectedGroup;
+        const match = list.find((g: { name: string }) => String(g?.name).trim() === groupName || String(g?.name).trim() === selectedGroup);
+        if (match) {
+          setResolvedSessionId(sessionId);
+          setResolvedClassGroupId(match.group_id ?? match.id);
+        } else {
+          setResolvedSessionId(null);
+          setResolvedClassGroupId(null);
+        }
+      } catch (_) {
+        if (!cancelled) {
+          setResolvedSessionId(null);
+          setResolvedClassGroupId(null);
+        }
+      } finally {
+        if (!cancelled) setResolvingIds(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [showTimetable, selectedSession, selectedCourse, selectedLevel, selectedGroup, allSessions]);
+
+  // If viewing timetable, show the timetable view (after resolving session and group ids)
   if (showTimetable) {
+    if (resolvingIds) {
+      return (
+        <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#0f2044] mx-auto mb-4" />
+            <p className="text-slate-600">Loading your timetable...</p>
+          </div>
+        </div>
+      );
+    }
     return (
       <StudentTimetableView
         session={selectedSession}
@@ -107,6 +171,8 @@ export function StudentLandingPage({ onOfficerLoginClick }: { onOfficerLoginClic
         level={selectedLevel}
         group={selectedGroup}
         onBack={handleBackToSearch}
+        sessionId={resolvedSessionId ?? undefined}
+        classGroupId={resolvedClassGroupId ?? undefined}
       />
     );
   }
@@ -179,28 +245,17 @@ export function StudentLandingPage({ onOfficerLoginClick }: { onOfficerLoginClic
       {/* Find Your Timetable Section */}
       <section className="bg-white py-12">
         <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
-          {searchView === 'classic' ? (
-            <Card className="shadow-xl border-2 border-slate-200">
-              <div className="bg-[#0f2044] text-white p-6 rounded-t-lg flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="bg-[#ffb71b] rounded-full p-2">
-                    <Search className="size-5 text-[#0f2044]" />
-                  </div>
-                  <div>
-                    <h3 className="text-2xl font-bold">Find Your Timetable</h3>
-                    <p className="text-slate-300 text-sm mt-1">
-                      Select your academic details to view your personalized schedule
-                    </p>
-                  </div>
+          <Card className="shadow-xl border-2 border-slate-200">
+              <div className="bg-[#0f2044] text-white p-6 rounded-t-lg flex items-center gap-3">
+                <div className="bg-[#ffb71b] rounded-full p-2">
+                  <Search className="size-5 text-[#0f2044]" />
                 </div>
-                <Button
-                  onClick={() => setSearchView('advanced')}
-                  variant="outline"
-                  className="text-white border-white hover:bg-white/10"
-                  size="sm"
-                >
-                  Try Advanced Search
-                </Button>
+                <div>
+                  <h3 className="text-2xl font-bold">Find Your Timetable</h3>
+                  <p className="text-slate-300 text-sm mt-1">
+                    Select your academic details to view your personalized schedule
+                  </p>
+                </div>
               </div>
 
               <div className="p-6 space-y-6">
@@ -305,9 +360,6 @@ export function StudentLandingPage({ onOfficerLoginClick }: { onOfficerLoginClic
                 </Button>
               </div>
             </Card>
-          ) : (
-            <TimetableSearch />
-          )}
         </div>
       </section>
 
