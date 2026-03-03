@@ -32,7 +32,18 @@ class ApiService {
     if (msg.includes('non_computing') || msg.includes('non_computing_courses')) return 'A non-computing course with this course code already exists for this session.';
     if (msg.includes('special_events')) return 'A special event for this session, day and level already exists. You cannot set the same thing twice.';
     if (msg.includes('idx_class_groups_unique') || (msg.includes('class_groups') && msg.includes('unique'))) return 'A class group with this name and level already exists in this department for this session. Use a different group name or level.';
+    if (msg.includes('idx_semesters_session_name') || (msg.includes('semesters') && msg.includes('session'))) return 'A semester with this name already exists for this session. Use a different name or edit the existing semester.';
     return 'Name already exists. Please use a different name.';
+  }
+
+  _friendlyFkError(error) {
+    if (!error) return null;
+    const msg = (error.message || '').toLowerCase();
+    const code = error.code || error.errno;
+    if (code === '23503' || code === 23503 || msg.includes('foreign key')) {
+      if (msg.includes('lecturers') && msg.includes('schedules')) return 'Cannot delete or update this lecturer because they are assigned to one or more schedules. Remove or reassign those schedules first.';
+    }
+    return null;
   }
 
   // Helper to handle Supabase responses
@@ -41,7 +52,9 @@ class ApiService {
       // Only log real Supabase/PostgREST errors, not our own { message } objects
       const isRealError = error.code != null || error.details != null || error.statusCode != null || (error.hint != null);
       if (isRealError) console.error('Supabase error:', error.message || error);
-      const friendly = this._friendlyDuplicateError(error);
+      const friendlyDup = this._friendlyDuplicateError(error);
+      const friendlyFk = this._friendlyFkError(error);
+      const friendly = friendlyDup || friendlyFk;
       return {
         success: false,
         error: friendly || error.message || error.code || 'An error occurred',
@@ -776,6 +789,8 @@ class ApiService {
   }
 
   async deleteLecturer(id) {
+    const { error: schedErr } = await supabase.from('schedules').delete().eq('lecturer_id', id);
+    if (schedErr) return this.handleResponse(null, schedErr);
     const { data, error } = await supabase.from('lecturers').delete().eq('lecturer_id', id);
     return this.handleResponse(data, error);
   }
@@ -928,7 +943,7 @@ class ApiService {
 
   async addSemestersToSession(sessionId, semesters) {
     const toInsert = (semesters || []).map((s) => ({ ...s, session_id: sessionId }));
-    const { data, error } = await supabase.from('semesters').insert(toInsert).select();
+    const { data, error } = await supabase.from('semesters').upsert(toInsert, { onConflict: 'session_id,name', ignoreDuplicates: false }).select();
     return this.handleResponse(data, error);
   }
 
@@ -953,7 +968,7 @@ class ApiService {
       const hasActive = Array.isArray(existing) && existing.some((s) => s.status === 'active');
       if (hasActive) return this.handleResponse(null, { message: 'Only one semester can be active at a time. Deactivate the current semester before adding another.' });
     }
-    const { data: res, error } = await supabase.from('semesters').insert([data]).select().single();
+    const { data: res, error } = await supabase.from('semesters').upsert([data], { onConflict: 'session_id,name' }).select().single();
     if (error) return this.handleResponse(null, error);
     if (res && data.status === 'active' && sessionId != null) {
       await supabase.from('semesters').update({ status: 'inactive' }).eq('session_id', sessionId).neq('semester_id', res.semester_id);

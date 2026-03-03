@@ -233,7 +233,7 @@ export function LecturerManagement({ activeSessionId }: { activeSessionId: numbe
       return;
     }
 
-    if (!confirm('Are you sure you want to delete this lecturer?')) {
+    if (!confirm('Are you sure you want to delete this lecturer? Any classes currently assigned to them will be removed from the timetable and those slots will become available to reassign.')) {
       return;
     }
 
@@ -247,7 +247,7 @@ export function LecturerManagement({ activeSessionId }: { activeSessionId: numbe
         // Immediately refresh the list
         await fetchLecturers();
       } else {
-        const errorMsg = (response as any).error | 'Failed to delete lecturer';
+        const errorMsg = (response as any)?.error || 'Failed to delete lecturer';
         console.error('Delete error response:', { response, lecturerId });
         toast.error(errorMsg);
       }
