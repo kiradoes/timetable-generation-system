@@ -263,41 +263,49 @@ export function StudentTimetableView({
       const detailsY = 26;
       doc.text(`${session}  |  ${semester}  |  ${getCourseName(course)}  |  Level ${level}  |  Group ${group}  |  ${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}`, pageW / 2, detailsY, { align: 'center' });
 
-      // Rows = days (Mon–Fri), columns = time 7–6; break/special only from academic settings
+      // Rows = days (Mon–Fri), columns = time 7–6; multi-hour lectures as single merged cell (no line in between)
+      type PdfCell = string | { content: string; colSpan: number };
       const tableData = days.map((day) => {
-        const row: string[] = [day];
-        timeSlots.forEach((_, slotIndex) => {
+        const row: (string | PdfCell)[] = [day];
+        let slotIndex = 0;
+        while (slotIndex < timeSlots.length) {
           const cell = getCellForSlot(day, slotIndex);
-          if (cell.type === 'course') {
-            row.push(`${caps(cell.entry.courseCode)}\n${venueCase(cell.entry.venue)}\n${lecturerFirst(cell.entry.lecturer)}`);
-          } else if (cell.type === 'special') {
-            row.push(cell.label);
-          } else if (cell.type === 'skip') {
-            const entry = timetableData.find((e) => e.day === day && getSlotIndices(e.start_time, e.end_time).includes(slotIndex));
-            row.push(entry ? `${caps(entry.courseCode)}\n${venueCase(entry.venue)}\n${lecturerFirst(entry.lecturer)}` : '-');
+          const content = (() => {
+            if (cell.type === 'course') return `${caps(cell.entry.courseCode)}\n${venueCase(cell.entry.venue)}\n${lecturerFirst(cell.entry.lecturer)}`;
+            if (cell.type === 'special') return cell.label;
+            if (cell.type === 'skip') {
+              const entry = timetableData.find((e) => e.day === day && getSlotIndices(e.start_time, e.end_time).includes(slotIndex));
+              return entry ? `${caps(entry.courseCode)}\n${venueCase(entry.venue)}\n${lecturerFirst(entry.lecturer)}` : '-';
+            }
+            return '-';
+          })();
+          if (cell.type === 'course' && cell.span > 1) {
+            row.push({ content, colSpan: cell.span });
+            slotIndex += cell.span;
           } else {
-            row.push('-');
+            row.push(content);
+            slotIndex += 1;
           }
-        });
+        }
         return row;
       });
 
-      const dayColWidth = 28;
+      const dayColWidth = 26;
       const timeColWidth = (tableWidth - dayColWidth) / timeSlots.length;
-      const tableFontSize = 9;
-      const tableCellPadding = 5;
-      const colStyles: Record<string, { cellWidth: number; fontStyle?: 'bold' | 'normal'; halign?: 'left' | 'center' | 'right'; fontSize?: number; cellPadding?: number | { top?: number; right?: number; bottom?: number; left?: number } }> = {
-        '0': { cellWidth: dayColWidth, fontStyle: 'bold', halign: 'left', fontSize: tableFontSize, cellPadding: { left: 6, right: 6, top: tableCellPadding, bottom: tableCellPadding } },
+      const tableFontSize = 8;
+      const tableCellPadding = 3;
+      const colStyles: Record<string, { cellWidth: number; fontStyle?: 'bold' | 'normal'; halign?: 'left' | 'center' | 'right'; fontSize?: number; cellPadding?: number | { top?: number; right?: number; bottom?: number; left?: number }; overflow?: 'linebreak' | 'ellipsize' | 'visible' | 'hidden' }> = {
+        '0': { cellWidth: dayColWidth, fontStyle: 'bold', halign: 'left', fontSize: tableFontSize, overflow: 'hidden', cellPadding: { left: 2, right: 2, top: tableCellPadding, bottom: tableCellPadding } },
       };
       timeSlots.forEach((_, i) => {
-        colStyles[String(i + 1)] = { cellWidth: timeColWidth, halign: 'center', fontSize: tableFontSize };
+        colStyles[String(i + 1)] = { cellWidth: timeColWidth, halign: 'center', fontSize: tableFontSize, fontStyle: 'bold' };
       });
 
       const tableStartY = detailsY + 6;
       const footerY = pageH - 8;
       const availableHeight = footerY - tableStartY - 4;
       const rowCount = 1 + tableData.length;
-      const minCellHeight = Math.max(14, availableHeight / rowCount);
+      const minCellHeight = Math.max(8, Math.floor(availableHeight / rowCount));
 
       autoTable(doc, {
         startY: tableStartY,
@@ -306,19 +314,24 @@ export function StudentTimetableView({
         body: tableData,
         theme: 'grid',
         tableWidth,
+        pageBreak: 'avoid',
+        tableLineWidth: 0.25,
+        tableLineColor: [120, 120, 120],
         headStyles: { fillColor: [15, 32, 68], textColor: [255, 255, 255], fontSize: tableFontSize, fontStyle: 'bold', halign: 'center', cellPadding: tableCellPadding },
-        bodyStyles: { fontSize: tableFontSize, cellPadding: tableCellPadding, valign: 'middle', overflow: 'linebreak', minCellHeight },
+        bodyStyles: { fontSize: tableFontSize, fontStyle: 'bold', cellPadding: tableCellPadding, valign: 'middle', overflow: 'linebreak', minCellHeight },
         columnStyles: colStyles,
-        styles: { lineColor: [200, 200, 200], lineWidth: 0.1 },
+        styles: { lineColor: [120, 120, 120], lineWidth: 0.25 },
       });
 
-      const pageCount = doc.getNumberOfPages();
-      for (let i = 1; i <= pageCount; i++) {
-        doc.setPage(i);
-        doc.setFontSize(9);
-        doc.setTextColor(100, 100, 100);
-        doc.text(`Page ${i} of ${pageCount} | School of Computing Timetable System`, pageW / 2, footerY, { align: 'center' });
+      // Ensure only one page: remove any extra pages created by table overflow
+      const totalPages = doc.getNumberOfPages();
+      for (let p = totalPages; p > 1; p--) {
+        doc.deletePage(p);
       }
+      doc.setPage(1);
+      doc.setFontSize(9);
+      doc.setTextColor(100, 100, 100);
+      doc.text('School of Computing Timetable System', pageW / 2, footerY, { align: 'center' });
 
       const fileName = `Timetable_${getCourseName(course).replace(/\s+/g, '_')}_${level}_Group_${group}_${semester}.pdf`;
       doc.save(fileName);
