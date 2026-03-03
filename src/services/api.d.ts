@@ -1,0 +1,75 @@
+export interface ApiResponse<T = any> {
+    success: boolean;
+    data?: T;
+    error?: string | null;
+}
+
+export class ApiService {
+    login(email: string, password: string): Promise<ApiResponse<any>>;
+    logout(): Promise<ApiResponse<null>>;
+    getCurrentUser(): Promise<ApiResponse<any>>;
+    getSessions(params: any): Promise<ApiResponse<any>>;
+    createSession(data: any): Promise<ApiResponse<any>>;
+    updateSession(id: number, data: any): Promise<ApiResponse<any>>;
+    deleteSession(id: number): Promise<ApiResponse<any>>;
+    setCurrentSession(id: number): Promise<ApiResponse<any>>;
+    clearCurrentSession(): Promise<ApiResponse<any>>;
+    getLecturers(params: any): Promise<ApiResponse<any>>;
+    createLecturer(data: any): Promise<ApiResponse<any>>;
+    updateLecturer(id: number, data: any): Promise<ApiResponse<any>>;
+    deleteLecturer(id: number): Promise<ApiResponse<any>>;
+    getCourses(params: any): Promise<ApiResponse<any>>;
+    createCourse(data: any): Promise<ApiResponse<any>>;
+    updateCourse(id: number, data: any): Promise<ApiResponse<any>>;
+    deleteCourse(id: number): Promise<ApiResponse<any>>;
+    getOfficers(params: any): Promise<ApiResponse<any>>;
+    createOfficer(data: any): Promise<ApiResponse<any>>;
+    updateOfficer(id: number, data: any): Promise<ApiResponse<any>>;
+    deleteOfficer(id: number): Promise<ApiResponse<any>>;
+    getVenues(params: any): Promise<ApiResponse<any>>;
+    createVenue(data: any): Promise<ApiResponse<any>>;
+    updateVenue(id: number, data: any): Promise<ApiResponse<any>>;
+    deleteVenue(id: number): Promise<ApiResponse<any>>;
+    getClassGroups(params: any): Promise<ApiResponse<any>>;
+    createClassGroup(data: any): Promise<ApiResponse<any>>;
+    updateClassGroup(id: number, data: any): Promise<ApiResponse<any>>;
+    deleteClassGroup(id: number): Promise<ApiResponse<any>>;
+    getDepartments(params?: any): Promise<ApiResponse<any>>;
+    createDepartment(data: any): Promise<ApiResponse<any>>;
+    updateDepartment(id: number, data: any): Promise<ApiResponse<any>>;
+    getCurrentSession(): Promise<ApiResponse<any>>;
+    getProfile(): Promise<ApiResponse<any>>;
+    getLecturerPreference(lecturerId: number): Promise<ApiResponse<any>>;
+    createLecturerPreference(data: any): Promise<ApiResponse<any>>;
+    updateLecturerPreference(id: number, data: any): Promise<ApiResponse<any>>;
+    deleteLecturerPreference(id: number): Promise<ApiResponse<any>>;
+    getSchoolOfficerDashboard(): Promise<ApiResponse<any>>;
+    getDepartmentOfficerDashboard(): Promise<ApiResponse<any>>;
+    getSpecialEvents(params?: any): Promise<ApiResponse<any>>;
+    getSpecialEventById(id: number): Promise<ApiResponse<any>>;
+    createSpecialEvent(data: any): Promise<ApiResponse<any>>;
+    updateSpecialEvent(id: number, data: any): Promise<ApiResponse<any>>;
+    deleteSpecialEvent(id: number): Promise<ApiResponse<any>>;
+    getTimetables(params?: any): Promise<ApiResponse<any>>;
+    getTimetableById(id: number): Promise<ApiResponse<any>>;
+    createTimetable(data: any): Promise<ApiResponse<any>>;
+    updateTimetable(id: number, data: any): Promise<ApiResponse<any>>;
+    getSchedules(params?: any): Promise<ApiResponse<any>>;
+    getSchedulesByTimetable(timetableId: number): Promise<ApiResponse<any>>;
+    checkVenueConflict(sessionId: number, venueId: number, day: string, startTime: string, endTime: string, excludeScheduleId?: number | null): Promise<{ success: boolean; conflict?: boolean; message?: string }>;
+    checkClassGroupTimeConflict(sessionId: number, groupId: number, day: string, startTime: string, endTime: string, excludeScheduleId?: number | null, courseId?: number | null): Promise<{ success: boolean; conflict?: boolean; message?: string }>;
+    checkCourseHoursForGroup(sessionId: number, courseId: number, classGroupId: number, durationHours: number, excludeScheduleId?: number | null): Promise<{ success: boolean; overLimit?: boolean; message?: string }>;
+    checkSpecialEventConflict(sessionId: number, day: string, startTime: string, endTime: string, classGroupLevel: number | string | null): Promise<{ success: boolean; conflict?: boolean; message?: string }>;
+    createSchedule(data: any): Promise<ApiResponse<any>>;
+    updateSchedule(id: number, data: any): Promise<ApiResponse<any>>;
+    deleteSchedule(id: number): Promise<ApiResponse<any>>;
+    getPublicDepartments(): Promise<ApiResponse<any>>;
+    getClassGroupsByDepartmentAndLevel(department: string, level: number): Promise<ApiResponse<any>>;
+    getPublicTimetable(classGroupId: number, sessionId: number): Promise<ApiResponse<any>>;
+    getSemesters(params?: any): Promise<ApiResponse<any>>;
+    getSemestersBySession(sessionId: number): Promise<ApiResponse<any>>;
+    updateSemester(id: number, data: any): Promise<ApiResponse<any>>;
+}
+
+declare const api: ApiService;
+export default api;
