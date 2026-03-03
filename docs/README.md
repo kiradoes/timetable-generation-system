@@ -43,7 +43,6 @@ The application will be available at `http://localhost:5173`
 Create a `.env.local` file:
 
 ```env
-VITE_API_URL=http://localhost:5000/api
 VITE_APP_NAME=Timetable Generation System
 VITE_ENVIRONMENT=development
 ```
@@ -71,18 +70,8 @@ frontend/
 
 See [docs/FOLDER_STRUCTURE.md](docs/FOLDER_STRUCTURE.md) for detailed structure.
 
-## 🔑 Default Login Credentials
 
-### School Timetable Officer
-- Email: `school.officer@babcock.edu.ng`
-- Password: `schooladmin123`
 
-### Department Timetable Officers
-- Computer Science: `department.cs@babcock.edu.ng` / `dept123`
-- Software Engineering: `department.se@babcock.edu.ng` / `dept123`
-- Information Technology: `department.it@babcock.edu.ng` / `dept123`
-- Information Systems: `department.is@babcock.edu.ng` / `dept123`
-- Cyber Security: `department.cyber@babcock.edu.ng` / `dept123`
 
 See [docs/QUICK_REFERENCE.md](docs/QUICK_REFERENCE.md) for complete feature list.
 
@@ -158,7 +147,6 @@ This project uses components from [shadcn/ui](https://ui.shadcn.com/) under MIT 
 
 ## 🔗 Related Projects
 
-- Backend API: `../backend/`
 - Original Design: [Figma File](https://www.figma.com/design/glOE0rHm8K1QKttI0I7sJS/Computer-Aided-Timetable-System)
 
 ## 📞 Support
