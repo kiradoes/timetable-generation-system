@@ -241,25 +241,25 @@ export function StudentTimetableView({
     setIsExporting(true);
     try {
       const doc = new jsPDF('landscape');
+      const pageW = doc.internal.pageSize.getWidth();
+      const pageH = doc.internal.pageSize.getHeight();
+      const margin = 6;
+      const tableWidth = pageW - margin * 2;
+
       doc.setFillColor(15, 32, 68);
-      doc.rect(0, 0, 297, 30, 'F');
+      doc.rect(0, 0, pageW, 22, 'F');
       doc.setTextColor(255, 255, 255);
-      doc.setFontSize(20);
+      doc.setFontSize(16);
       doc.setFont('helvetica', 'bold');
-      doc.text('SCHOOL OF COMPUTING TIMETABLE', 148.5, 12, { align: 'center' });
-      doc.setFontSize(10);
+      doc.text('SCHOOL OF COMPUTING TIMETABLE', pageW / 2, 10, { align: 'center' });
+      doc.setFontSize(9);
       doc.setFont('helvetica', 'normal');
-      doc.text('School of Computing Timetable System | Babcock University Computing Club', 148.5, 20, { align: 'center' });
+      doc.text('School of Computing Timetable System | Babcock University Computing Club', pageW / 2, 17, { align: 'center' });
 
       doc.setTextColor(15, 32, 68);
       doc.setFontSize(10);
-      const detailsY = 38;
-      doc.text(`Academic Session: ${session}`, 14, detailsY);
-      doc.text(`Semester: ${semester}`, 14, detailsY + 6);
-      doc.text(`Course: ${getCourseName(course)}`, 14, detailsY + 12);
-      doc.text(`Level: ${level}`, 150, detailsY);
-      doc.text(`Group: ${group}`, 150, detailsY + 6);
-      doc.text(`Generated: ${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}`, 150, detailsY + 12);
+      const detailsY = 26;
+      doc.text(`${session}  |  ${semester}  |  ${getCourseName(course)}  |  Level ${level}  |  Group ${group}  |  ${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}`, pageW / 2, detailsY, { align: 'center' });
 
       // Rows = days (Mon–Fri), columns = time 7–6; break/special only from academic settings
       const tableData = days.map((day) => {
@@ -280,33 +280,32 @@ export function StudentTimetableView({
         return row;
       });
 
-      const margin = 8;
-      const tableWidth = 297 - margin * 2;
-      const dayColWidth = 12;
+      const dayColWidth = 28;
       const timeColWidth = (tableWidth - dayColWidth) / timeSlots.length;
-      const colStyles: Record<string, { cellWidth: number; fontStyle?: 'bold' | 'normal'; halign?: 'left' | 'center' | 'right'; fontSize?: number }> = {
-        '0': { cellWidth: dayColWidth, fontStyle: 'bold', halign: 'left', fontSize: 4 },
+      const tableFontSize = 9;
+      const tableCellPadding = 5;
+      const colStyles: Record<string, { cellWidth: number; fontStyle?: 'bold' | 'normal'; halign?: 'left' | 'center' | 'right'; fontSize?: number; cellPadding?: number | { top?: number; right?: number; bottom?: number; left?: number } }> = {
+        '0': { cellWidth: dayColWidth, fontStyle: 'bold', halign: 'left', fontSize: tableFontSize, cellPadding: { left: 6, right: 6, top: tableCellPadding, bottom: tableCellPadding } },
       };
       timeSlots.forEach((_, i) => {
-        colStyles[String(i + 1)] = { cellWidth: timeColWidth, halign: 'center', fontSize: 4 };
+        colStyles[String(i + 1)] = { cellWidth: timeColWidth, halign: 'center', fontSize: tableFontSize };
       });
 
-      const shortTimeSlots = timeSlots.map((t) => {
-        const m = t.match(/(\d+):?\d*\s*(AM|PM)\s*-\s*(\d+):?\d*\s*(AM|PM)/i);
-        if (!m) return t;
-        const a = m[2].toUpperCase();
-        return `${m[1]}-${m[3]}${a === 'AM' ? 'A' : 'P'}`;
-      });
+      const tableStartY = detailsY + 6;
+      const footerY = pageH - 8;
+      const availableHeight = footerY - tableStartY - 4;
+      const rowCount = 1 + tableData.length;
+      const minCellHeight = Math.max(14, availableHeight / rowCount);
 
       autoTable(doc, {
-        startY: detailsY + 16,
+        startY: tableStartY,
         margin: { left: margin, right: margin },
-        head: [['Day', ...shortTimeSlots]],
+        head: [['Day', ...timeSlots]],
         body: tableData,
         theme: 'grid',
         tableWidth,
-        headStyles: { fillColor: [15, 32, 68], textColor: [255, 255, 255], fontSize: 4, fontStyle: 'bold', halign: 'center', cellPadding: 0.5 },
-        bodyStyles: { fontSize: 4, cellPadding: 0.5, valign: 'middle', overflow: 'linebreak' },
+        headStyles: { fillColor: [15, 32, 68], textColor: [255, 255, 255], fontSize: tableFontSize, fontStyle: 'bold', halign: 'center', cellPadding: tableCellPadding },
+        bodyStyles: { fontSize: tableFontSize, cellPadding: tableCellPadding, valign: 'middle', overflow: 'linebreak', minCellHeight },
         columnStyles: colStyles,
         styles: { lineColor: [200, 200, 200], lineWidth: 0.1 },
       });
@@ -314,9 +313,9 @@ export function StudentTimetableView({
       const pageCount = doc.getNumberOfPages();
       for (let i = 1; i <= pageCount; i++) {
         doc.setPage(i);
-        doc.setFontSize(8);
+        doc.setFontSize(9);
         doc.setTextColor(100, 100, 100);
-        doc.text(`Page ${i} of ${pageCount} | School of Computing Timetable System`, 148.5, 205, { align: 'center' });
+        doc.text(`Page ${i} of ${pageCount} | School of Computing Timetable System`, pageW / 2, footerY, { align: 'center' });
       }
 
       const fileName = `Timetable_${getCourseName(course).replace(/\s+/g, '_')}_${level}_Group_${group}_${semester}.pdf`;
@@ -346,7 +345,7 @@ export function StudentTimetableView({
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
           <div className="flex flex-col items-center text-center">
             <h1 className="text-xl sm:text-2xl font-bold text-white uppercase tracking-wide">
-              School of Computing Timetable
+              School of Computing Timetable{group ? ` — Group ${group}` : ''}
             </h1>
             <p className="text-sm sm:text-base text-white font-normal mt-1.5">
               School of Computing Timetable System
@@ -432,13 +431,22 @@ export function StudentTimetableView({
               <p className="text-sm text-amber-700 mt-1">Only published timetables are visible to students.</p>
             </CardContent>
           </Card>
+        ) : !sessionId || !classGroupId ? (
+          <Card className="shadow-lg border-amber-200 bg-amber-50">
+            <CardContent className="py-12 text-center">
+              <BookOpen className="size-12 mx-auto text-amber-500 mb-4" />
+              <h3 className="text-lg font-semibold text-amber-900">Could not load timetable</h3>
+              <p className="text-amber-800 mt-2">Your selection could not be resolved. Go back and choose <strong>Academic Session</strong>, <strong>Course of Study</strong>, <strong>Level</strong>, and <strong>Group</strong> again, then click View Timetable.</p>
+              <p className="text-sm text-amber-700 mt-1">If the problem continues, your department may not have published a timetable for this session yet.</p>
+            </CardContent>
+          </Card>
         ) : timetableData.length === 0 ? (
           <Card className="shadow-lg">
             <CardContent className="py-12 text-center">
               <BookOpen className="size-12 mx-auto text-slate-300 mb-4" />
               <h3 className="text-lg font-semibold text-[#0f2044]">No schedule found</h3>
               <p className="text-slate-600 mt-2">There is no timetable scheduled yet for {getCourseName(course)} {level} Group {group}.</p>
-              <p className="text-sm text-slate-500 mt-1">Schedules are created by timetable officers. Only your selected level and group are shown.</p>
+              <p className="text-sm text-slate-500 mt-1">Schedules are created by timetable officers. If you just published, try again. Otherwise confirm your session and group are correct.</p>
             </CardContent>
           </Card>
         ) : (
@@ -456,7 +464,7 @@ export function StudentTimetableView({
                   <table className="w-full border-collapse">
                     <thead>
                       <tr className="bg-[#0f2044]">
-                        <th className="border border-slate-300 px-3 py-2.5 text-left text-white font-semibold w-28 sticky left-0 z-10 bg-[#0f2044] text-sm">
+                        <th className="border border-slate-300 px-5 py-3 text-left text-white font-semibold min-w-[7.5rem] w-36 sticky left-0 z-10 bg-[#0f2044] text-sm">
                           Day
                         </th>
                         {TIME_SLOT_HEADERS.map((header, i) => (
@@ -469,7 +477,7 @@ export function StudentTimetableView({
                     <tbody>
                       {days.map((day, rowIndex) => (
                         <tr key={day} className={rowIndex % 2 === 0 ? 'bg-white' : 'bg-slate-50'}>
-                          <td className={`border border-slate-300 px-3 py-2.5 font-semibold text-[#0f2044] text-sm sticky left-0 z-10 ${rowIndex % 2 === 0 ? 'bg-white' : 'bg-slate-50'}`}>
+                          <td className={`border border-slate-300 px-5 py-3 font-semibold text-[#0f2044] text-sm sticky left-0 z-10 ${rowIndex % 2 === 0 ? 'bg-white' : 'bg-slate-50'}`}>
                             {day}
                           </td>
                           {STANDARD_TIME_SLOTS.map((_, slotIndex) => {

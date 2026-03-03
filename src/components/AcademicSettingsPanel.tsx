@@ -1,11 +1,11 @@
+import { Calendar, Check, Clock, Plus, Settings, Trash2, X } from 'lucide-react';
 import { useState } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
+import { toast } from 'sonner';
+import { Badge } from './ui/badge';
 import { Button } from './ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
-import { Badge } from './ui/badge';
-import { Settings, Calendar, Clock, Save, AlertCircle, X, Check, Trash2, Plus } from 'lucide-react';
-import { toast } from 'sonner';
 
 interface TimeSlot {
   id: string;
