@@ -31,6 +31,12 @@ export function StudentLandingPage({ onOfficerLoginClick }: { onOfficerLoginClic
     setSelectedGroup(''); // Reset group when level changes
   };
 
+  // Clear resolved ids when user changes selection so we never show another class's timetable
+  useEffect(() => {
+    setResolvedSessionId(null);
+    setResolvedClassGroupId(null);
+  }, [selectedSession, selectedCourse, selectedLevel, selectedGroup]);
+
   // Get available groups based on selected level
   const getGroupsForLevel = () => {
     if (!selectedLevel) return [];
@@ -101,12 +107,14 @@ export function StudentLandingPage({ onOfficerLoginClick }: { onOfficerLoginClic
     fetchActiveDepartments();
   }, []);
 
-  // Resolve sessionId and classGroupId when viewing timetable (so the timetable can load)
+  // Resolve sessionId and classGroupId when viewing timetable (so the timetable matches the class selected)
   useEffect(() => {
     if (!showTimetable || !selectedSession || !selectedCourse || !selectedLevel || !selectedGroup) {
       return;
     }
     let cancelled = false;
+    setResolvedSessionId(null);
+    setResolvedClassGroupId(null);
     setResolvingIds(true);
     (async () => {
       try {

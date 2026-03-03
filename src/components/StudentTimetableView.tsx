@@ -436,10 +436,9 @@ export function StudentTimetableView({
         ) : !sessionId || !classGroupId ? (
           <Card className="shadow-lg border-amber-200 bg-amber-50">
             <CardContent className="py-12 text-center">
-              <BookOpen className="size-12 mx-auto text-amber-500 mb-4" />
-              <h3 className="text-lg font-semibold text-amber-900">Could not load timetable</h3>
-              <p className="text-amber-800 mt-2">Your selection could not be resolved. Go back and choose <strong>Academic Session</strong>, <strong>Course of Study</strong>, <strong>Level</strong>, and <strong>Group</strong> again, then click View Timetable.</p>
-              <p className="text-sm text-amber-700 mt-1">If the problem continues, your department may not have published a timetable for this session yet.</p>
+              <BookOpen className="size-12 mx-auto text-slate-300 mb-4" />
+              <h3 className="text-lg font-semibold text-[#0f2044]">No timetable yet</h3>
+              <p className="text-slate-600 mt-2">There is no timetable available for your selection. Try again later or check back once your department has published the timetable.</p>
             </CardContent>
           </Card>
         ) : timetableData.length === 0 ? (
