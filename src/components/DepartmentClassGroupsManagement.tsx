@@ -154,7 +154,7 @@ export function DepartmentClassGroupsManagement({ departmentName, sessionId }: D
                                         required
                                     >
                                         {GROUP_OPTIONS.map((g) => (
-                                            <option key={g} value={g}>Group {g}</option>
+                                            <option key={g} value={g}>{g}</option>
                                         ))}
                                     </select>
                                 </div>
@@ -206,7 +206,7 @@ export function DepartmentClassGroupsManagement({ departmentName, sessionId }: D
                                 {paged.map((g) => (
                                     <tr key={g.group_id} className="border-b hover:bg-slate-50">
                                         <td className="p-3">{g.level}</td>
-                                        <td className="p-3">Group {g.name}</td>
+                                        <td className="p-3">{g.name}</td>
                                         <td className="p-3">{g.student_count}</td>
                                         <td className="p-3 text-right">
                                             <Button size="sm" variant="outline" onClick={() => handleEdit(g)} title="Edit">

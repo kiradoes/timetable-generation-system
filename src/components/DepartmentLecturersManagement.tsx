@@ -20,7 +20,7 @@ export function DepartmentLecturersManagement({ departmentName, sessionId }: Dep
     const [page, setPage] = useState(1);
     const itemsPerPage = 8;
 
-    const [formData, setFormData] = useState({ first_name: '', last_name: '' });
+    const [formData, setFormData] = useState({ first_name: '', last_name: '', preferences: '' });
 
     useEffect(() => {
         if (departmentName && sessionId) fetchLecturers();
@@ -41,12 +41,19 @@ export function DepartmentLecturersManagement({ departmentName, sessionId }: Dep
     const handleSubmit = async (e: any) => {
         e.preventDefault();
         try {
-            const data = {
+            const prefsJson = JSON.stringify({
+                preferences: formData.preferences != null ? String(formData.preferences).trim() : '',
+                preferred_times: [],
+                unavailable_days: [],
+                unavailable_times: [],
+            });
+            const data: any = {
                 first_name: formData.first_name.trim(),
                 last_name: formData.last_name.trim(),
                 name: `${formData.first_name.trim()} ${formData.last_name.trim()}`.trim(),
                 department: departmentName,
                 session_id: sessionId,
+                preferences: prefsJson,
             };
             const response = editingId
                 ? await api.updateLecturer(editingId, data)
@@ -64,7 +71,7 @@ export function DepartmentLecturersManagement({ departmentName, sessionId }: Dep
     };
 
     const resetForm = () => {
-        setFormData({ first_name: '', last_name: '' });
+        setFormData({ first_name: '', last_name: '', preferences: '' });
         setEditingId(null);
         setShowForm(false);
     };
@@ -72,7 +79,14 @@ export function DepartmentLecturersManagement({ departmentName, sessionId }: Dep
     const handleEdit = (lec: any) => {
         const first = lec.first_name ?? (lec.name ? lec.name.trim().split(/\s+/)[0] : '') ?? '';
         const last = lec.last_name ?? (lec.name ? lec.name.trim().split(/\s+/).slice(1).join(' ') : '') ?? '';
-        setFormData({ first_name: first, last_name: last });
+        let preferences = '';
+        if (lec.preferences) {
+            try {
+                const p = typeof lec.preferences === 'string' ? JSON.parse(lec.preferences) : lec.preferences;
+                preferences = p?.preferences != null ? String(p.preferences) : '';
+            } catch (_) {}
+        }
+        setFormData({ first_name: first, last_name: last, preferences });
         setEditingId(lec.lecturer_id);
         setShowForm(true);
     };
@@ -118,6 +132,17 @@ export function DepartmentLecturersManagement({ departmentName, sessionId }: Dep
                                     <Input value={formData.last_name} onChange={(e) => setFormData({ ...formData, last_name: e.target.value })} placeholder="e.g. Doe" required className="h-9" />
                                 </div>
                             </div>
+                            <div className="space-y-2">
+                                <Label>Preferences</Label>
+                                <textarea
+                                    className="w-full min-h-[80px] px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[#ffb71b] text-sm"
+                                    placeholder="e.g. Prefer morning slots; not available Wed afternoons"
+                                    value={formData.preferences}
+                                    onChange={(e) => setFormData({ ...formData, preferences: e.target.value })}
+                                    rows={3}
+                                />
+                                <p className="text-xs text-slate-500">Shown when scheduling so officers can take it into consideration.</p>
+                            </div>
                             <Button type="submit" size="sm" className="bg-[#0f2044] hover:bg-[#0f2044]/90 text-white h-9">{editingId ? 'Update' : 'Add'}</Button>
                         </form>
                     </CardContent>
@@ -135,13 +160,23 @@ export function DepartmentLecturersManagement({ departmentName, sessionId }: Dep
                             <thead>
                                 <tr className="border-b border-slate-200 bg-slate-50">
                                     <th className="text-left px-4 py-3 font-medium text-slate-700">Lecturer name</th>
+                                    <th className="text-left px-4 py-3 font-medium text-slate-700">Preferences</th>
                                     <th className="text-right px-4 py-3 font-medium text-slate-700">Actions</th>
                                 </tr>
                             </thead>
                             <tbody>
-                                {paged.map(lec => (
+                                {paged.map(lec => {
+                                    let prefText = '';
+                                    if (lec.preferences) {
+                                        try {
+                                            const p = typeof lec.preferences === 'string' ? JSON.parse(lec.preferences) : lec.preferences;
+                                            prefText = p?.preferences != null ? String(p.preferences).trim() : '';
+                                        } catch (_) {}
+                                    }
+                                    return (
                                     <tr key={lec.lecturer_id} className="border-b border-slate-100 hover:bg-slate-50">
                                         <td className="py-3 px-4">{[lec.first_name, lec.last_name].filter(Boolean).join(' ') || lec.name || '—'}</td>
+                                        <td className="py-3 px-4 text-slate-600 text-sm max-w-[240px] truncate" title={prefText}>{prefText || '—'}</td>
                                         <td className="py-3 px-4 text-right">
                                             <Button size="sm" variant="outline" onClick={() => handleEdit(lec)} title="Edit">
                                                 <Edit2 className="size-4" />
@@ -151,7 +186,8 @@ export function DepartmentLecturersManagement({ departmentName, sessionId }: Dep
                                             </Button>
                                         </td>
                                     </tr>
-                                ))}
+                                    );
+                                })}
                             </tbody>
                         </table>
                     </div>

@@ -1,4 +1,4 @@
-import { Edit2, Save, Settings, Trash2, UserPlus } from 'lucide-react';
+import { Edit2, Save, Search, Settings, Trash2, UserPlus } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import api from '../services/api';
@@ -19,6 +19,7 @@ export function SchoolLecturerPreferences() {
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [departmentFilter, setDepartmentFilter] = useState<string>('');
+  const [searchName, setSearchName] = useState<string>('');
 
   const [formData, setFormData] = useState({
     first_name: '',
@@ -275,27 +276,45 @@ export function SchoolLecturerPreferences() {
             </form>
           )}
 
-          {departments.length > 0 && (
-            <div className="mb-4 flex items-center gap-2 flex-wrap">
-              <Label className="text-[#0f2044] font-medium">Filter by department:</Label>
-              <select
-                value={departmentFilter}
-                onChange={(e) => setDepartmentFilter(e.target.value)}
-                className="px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[#ffb71b]"
-              >
-                <option value="">All departments</option>
-                {departments.map((d) => (
-                  <option key={d.department_id ?? d.name} value={d.name}>{d.name}</option>
-                ))}
-              </select>
+          <div className="mb-4 flex flex-wrap items-center gap-3">
+            <div className="relative flex-1 min-w-[200px] max-w-sm">
+              <Search className="absolute right-3 top-1/2 -translate-y-1/2 size-4 text-slate-400 pointer-events-none" />
+              <Input
+                placeholder="Search lecturer by name..."
+                value={searchName}
+                onChange={(e) => setSearchName(e.target.value)}
+                className="pr-14 border-slate-300 focus:ring-[#ffb71b]"
+              />
             </div>
-          )}
+            {departments.length > 0 && (
+              <>
+                <Label className="text-[#0f2044] font-medium shrink-0">Filter by department:</Label>
+                <select
+                  value={departmentFilter}
+                  onChange={(e) => setDepartmentFilter(e.target.value)}
+                  className="px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[#ffb71b]"
+                >
+                  <option value="">All departments</option>
+                  {departments.map((d) => (
+                    <option key={d.department_id ?? d.name} value={d.name}>{d.name}</option>
+                  ))}
+                </select>
+              </>
+            )}
+          </div>
           {loading && lecturers.length === 0 && <p className="text-slate-500 py-4">Loading...</p>}
           {!loading && lecturers.length === 0 && <p className="text-slate-500 py-4">No lecturers yet. Add one above.</p>}
           {lecturers.length > 0 && (() => {
-            const filtered = departmentFilter
+            const byDept = departmentFilter
               ? lecturers.filter((lec: any) => (lec.department || '') === departmentFilter)
               : lecturers;
+            const nameLower = (searchName || '').trim().toLowerCase();
+            const filtered = nameLower
+              ? byDept.filter((lec: any) => {
+                  const name = [lec.first_name, lec.last_name].filter(Boolean).join(' ') || lec.name || '';
+                  return name.toLowerCase().includes(nameLower);
+                })
+              : byDept;
             return (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">

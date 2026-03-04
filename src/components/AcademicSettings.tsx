@@ -47,13 +47,15 @@ export function AcademicSettings({ onSessionsOrSemestersChange }: { onSessionsOr
   const currentSession = activeSessions[0] ?? null;
   const activeSemester = semesters.find((s) => s.status === 'active') ?? null;
 
-  /** Normalize semester name for display: only "First" or "Second" */
+  /** Normalize semester name for display */
   const semesterDisplayName = (name: string | number | undefined) => {
     if (name === undefined || name === null) return '—';
     const n = String(name).trim().toLowerCase();
     if (n === 'first' || n === '1' || n === 'first semester') return 'First';
     if (n === 'second' || n === '2' || n === 'second semester') return 'Second';
-    return '—';
+    if (n.includes('post-siwes') || n === 'post siwes') return 'Post-SIWES';
+    if (n === 'summer' || n === 'summer semester') return 'Summer';
+    return String(name).trim();
   };
 
   useEffect(() => {
@@ -304,7 +306,7 @@ export function AcademicSettings({ onSessionsOrSemestersChange }: { onSessionsOr
                   Active semester: {semesterDisplayName(activeSemester.name)}
                 </p>
                 <p className="text-xs text-slate-600 mb-3">
-                  Deactivate this semester when done; you can then start a new one (First or Second). Schedule Lecture will show the new semester.
+                  Deactivate this semester when done; you can then start a new one (First, Second, Summer, or Post-SIWES). Schedule Lecture will show the new semester.
                 </p>
                 <Button
                   type="button"
@@ -319,7 +321,7 @@ export function AcademicSettings({ onSessionsOrSemestersChange }: { onSessionsOr
             ) : (
               <>
                 <p className="text-sm text-slate-600">
-                  No active semester. Start one (First or Second) so you can use Schedule Lecture and course lists.
+                  No active semester. Start one (First, Second, Summer, or Post-SIWES) so you can use Schedule Lecture and course lists.
                 </p>
                 {!showSemesterForm ? (
                   <Button
@@ -328,8 +330,18 @@ export function AcademicSettings({ onSessionsOrSemestersChange }: { onSessionsOr
                     className="bg-[#0f2044] hover:bg-[#0f2044]/90 text-white"
                     onClick={() => {
                       setShowSemesterForm(true);
+                      const hasFirst = semesters.some((s) => semesterDisplayName(s.name) === 'First');
+                      const hasSecond = semesters.some((s) => semesterDisplayName(s.name) === 'Second');
+                      const hasSummer = semesters.some((s) => semesterDisplayName(s.name) === 'Summer');
+                      const hasPostSiwes = semesters.some((s) => semesterDisplayName(s.name) === 'Post-SIWES');
+                      let defaultName = 'First';
+                      if (!hasFirst) defaultName = 'First';
+                      else if (!hasSecond) defaultName = 'Second';
+                      else if (!hasSummer) defaultName = 'Summer';
+                      else if (!hasPostSiwes) defaultName = 'Post-SIWES';
+                      else defaultName = 'Second';
                       setSemesterForm({
-                        name: semesters.some((s) => semesterDisplayName(s.name) === 'First') ? 'Second' : 'First',
+                        name: defaultName,
                         start_date: currentSession.start_date || '',
                         end_date: currentSession.end_date || '',
                       });
@@ -342,15 +354,18 @@ export function AcademicSettings({ onSessionsOrSemestersChange }: { onSessionsOr
                   <form onSubmit={handleStartNewSemester} className="space-y-3 pt-2 border-t border-slate-200">
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                       <div>
-                        <Label className="text-[#0f2044] font-medium">Semester (First or Second) *</Label>
+                        <Label className="text-[#0f2044] font-medium">Semester *</Label>
                         <select
                           value={semesterForm.name}
                           onChange={(e) => setSemesterForm({ ...semesterForm, name: e.target.value })}
                           className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#ffb71b]"
                         >
-                          <option value="First">First</option>
-                          <option value="Second">Second</option>
+                          <option value="First">First Semester</option>
+                          <option value="Second">Second Semester</option>
+                          <option value="Summer">Summer Semester</option>
+                          <option value="Post-SIWES">Post-SIWES Semester</option>
                         </select>
+                        <p className="text-xs text-slate-500 mt-1">Summer can start after Second ends. Summer and Post-SIWES run concurrently and share the same venue pool.</p>
                       </div>
                       <div>
                         <Label className="text-[#0f2044] font-medium">Start date *</Label>

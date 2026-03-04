@@ -1,9 +1,10 @@
-import { Edit, MapPin, Plus, Trash2 } from 'lucide-react';
+import { Edit, MapPin, Plus, Search, Trash2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import api from '../services/api';
 import { Button } from './ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
+import { Input } from './ui/input';
 import { Label } from './ui/label';
 
 interface Venue {
@@ -21,6 +22,7 @@ export function VenueManagement() {
   const [isLoading, setIsLoading] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [editingVenue, setEditingVenue] = useState<Venue | null>(null);
+  const [venueSearch, setVenueSearch] = useState('');
   const [formData, setFormData] = useState({
     name: '',
     type: 'Lecture Hall' as 'Lecture Hall' | 'Laboratory',
@@ -199,7 +201,17 @@ export function VenueManagement() {
           )}
 
           {venues.length > 0 && (
-            <div className="overflow-x-auto">
+            <>
+              <div className="relative max-w-sm mb-4">
+                <Search className="absolute right-3 top-1/2 -translate-y-1/2 size-4 text-slate-400 pointer-events-none" />
+                <Input
+                  placeholder="Search venue by name..."
+                  value={venueSearch}
+                  onChange={(e) => setVenueSearch(e.target.value)}
+                  className="pr-14 border-slate-300 focus:ring-[#ffb71b]"
+                />
+              </div>
+              <div className="overflow-x-auto">
               <table className="w-full">
                 <thead>
                   <tr className="border-b border-slate-200">
@@ -210,7 +222,14 @@ export function VenueManagement() {
                   </tr>
                 </thead>
                 <tbody>
-                  {venues.map((venue) => (
+                  {venues
+                    .filter((v) => {
+                    const q = (venueSearch || '').trim().replace(/\s+/g, '').toLowerCase();
+                    if (!q) return true;
+                    const text = (v.name || '').replace(/\s+/g, '').toLowerCase();
+                    return text.includes(q);
+                  })
+                    .map((venue) => (
                     <tr key={venue.venue_id} className="border-b border-slate-100 hover:bg-slate-50">
                       <td className="py-3 px-4">{venue.type}</td>
                       <td className="py-3 px-4 font-medium">{venue.name}</td>
@@ -227,7 +246,8 @@ export function VenueManagement() {
                   ))}
                 </tbody>
               </table>
-            </div>
+              </div>
+            </>
           )}
         </CardContent>
       </Card>

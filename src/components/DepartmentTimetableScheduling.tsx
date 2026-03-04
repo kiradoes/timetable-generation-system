@@ -10,6 +10,7 @@ import { Label } from './ui/label';
 interface DepartmentTimetableSchedulingProps {
     departmentName: string;
     sessionId: number | null;
+    activeSemester?: { name: string; semester_id?: number } | null;
 }
 
 interface ScheduleEntry {
@@ -57,7 +58,7 @@ const DURATIONS = [
     { value: 3, label: '3 Hours' },
 ];
 
-export function DepartmentTimetableScheduling({ departmentName, sessionId }: DepartmentTimetableSchedulingProps) {
+export function DepartmentTimetableScheduling({ departmentName, sessionId, activeSemester }: DepartmentTimetableSchedulingProps) {
     const [schedules, setSchedules] = useState<ScheduleEntry[]>([]);
     const [courses, setCourses] = useState<any[]>([]);
     const [lecturers, setLecturers] = useState<any[]>([]);
@@ -91,6 +92,17 @@ export function DepartmentTimetableScheduling({ departmentName, sessionId }: Dep
         }
     }, [departmentName, sessionId]);
 
+    // When semester changes, clear level, class group, and course so the user picks a class for the current semester. Lecturers and courses lists stay populated.
+    useEffect(() => {
+        setFormData((prev) => {
+            if (prev.level || prev.class_group_id || prev.course_id) {
+                return { ...prev, level: '', class_group_id: '', course_id: '' };
+            }
+            return prev;
+        });
+    }, [activeSemester?.semester_id ?? activeSemester?.name]);
+
+    // Lecturers and courses are loaded per session (and department) so they stay available for every semester in that session.
     const fetchAllData = async () => {
         if (!sessionId) return;
         setLoading(true);
@@ -166,7 +178,8 @@ export function DepartmentTimetableScheduling({ departmentName, sessionId }: Dep
             return;
         }
 
-        const hoursRes = await api.checkCourseHoursForGroup(sessionId!, parseInt(formData.course_id), parseInt(formData.class_group_id), durationHours, editingId ?? undefined);
+        const semesterId = activeSemester?.semester_id ?? undefined;
+        const hoursRes = await api.checkCourseHoursForGroup(sessionId!, parseInt(formData.course_id), parseInt(formData.class_group_id), durationHours, editingId ?? undefined, semesterId);
         if (hoursRes?.overLimit) {
             toast.error(hoursRes.message || 'This course can only be scheduled twice per week for this class group.');
             return;
@@ -182,7 +195,7 @@ export function DepartmentTimetableScheduling({ departmentName, sessionId }: Dep
             return;
         }
 
-        const scheduleData = {
+        const scheduleData: any = {
             session_id: sessionId,
             course_id: parseInt(formData.course_id),
             lecturer_id: parseInt(formData.lecturer_id),
@@ -195,6 +208,7 @@ export function DepartmentTimetableScheduling({ departmentName, sessionId }: Dep
             duration_hours: durationHours,
             created_by_role: 'department-officer',
         };
+        if (activeSemester?.semester_id != null) scheduleData.semester_id = activeSemester.semester_id;
 
         try {
             if (editingId) {
@@ -248,21 +262,48 @@ export function DepartmentTimetableScheduling({ departmentName, sessionId }: Dep
         return Array.from(set).sort((a, b) => Number(a) - Number(b));
     }, [groups]);
 
-    const groupsByLevel = formData.level ? groups.filter((g: any) => String(g.level) === String(formData.level)) : groups;
-    const coursesByLevel = formData.level ? courses.filter((c: any) => String(c.level) === String(formData.level)) : courses;
+    // Class groups: only those set in Class Management for the selected level (show nothing until level is chosen)
+    const groupsByLevel = formData.level ? groups.filter((g: any) => String(g.level) === String(formData.level)) : [];
+    // Courses: only for the selected level and department
+    const coursesByLevel = formData.level ? courses.filter((c: any) => String(c.level) === String(formData.level)) : [];
 
-    // Each course can only be scheduled twice per week per group. Courses disappear once scheduled twice (same as STTO).
+    const activeSemesterId = activeSemester?.semester_id ?? null;
+    const isPostSiwesSemester = Boolean(
+        activeSemester?.name && String(activeSemester.name).toLowerCase().includes('post-siwes')
+    );
+    const isSummerSemester = Boolean(
+        activeSemester?.name && String(activeSemester.name).toLowerCase().includes('summer')
+    );
+    // For hours-based semesters (Summer, Post-SIWES) and slot-based (First/Second), count only schedules in the active semester
+    const schedulesForCounting = activeSemesterId != null
+        ? schedules.filter((s: any) => (s.semester_id ?? null) === activeSemesterId)
+        : schedules;
+    const hoursBetween = (start: string, end: string) => {
+        const [sh, sm] = (start || '0:0').slice(0, 5).split(':').map(Number);
+        const [eh, em] = (end || '0:0').slice(0, 5).split(':').map(Number);
+        return (eh - sh) + (em - sm) / 60;
+    };
+
     const scheduledCountByCourseGroup = useMemo(() => {
         const map = new Map<string, number>();
-        for (const s of schedules) {
+        for (const s of schedulesForCounting) {
             if (editingId != null && (s.schedule_id === editingId || (s as any).id === editingId)) continue;
             const key = `${Number(s.course_id)}-${Number(s.class_group_id)}`;
             map.set(key, (map.get(key) || 0) + 1);
         }
         return map;
-    }, [schedules, editingId]);
-    // Alias so any code still referencing the old name (e.g. cached bundles) does not throw ReferenceError
-    const scheduledHoursByCourseGroup = scheduledCountByCourseGroup; // used at runtime if old bundle references it
+    }, [schedulesForCounting, editingId]);
+
+    const scheduledHoursByCourseGroup = useMemo(() => {
+        const map = new Map<string, number>();
+        for (const s of schedulesForCounting) {
+            if (editingId != null && (s.schedule_id === editingId || (s as any).id === editingId)) continue;
+            const key = `${Number(s.course_id)}-${Number(s.class_group_id)}`;
+            const hrs = hoursBetween((s as any).start_time || '', (s as any).end_time || '');
+            map.set(key, (map.get(key) || 0) + hrs);
+        }
+        return map;
+    }, [schedulesForCounting, editingId]);
 
     const editingEntryCourseId = editingId ? schedules.find((s: any) => s.schedule_id === editingId || s.id === editingId)?.course_id : null;
 
@@ -286,12 +327,24 @@ export function DepartmentTimetableScheduling({ departmentName, sessionId }: Dep
         return coursesByLevel.filter((c: any) => {
             const courseId = Number(c.course_id ?? c.id);
             const key = `${courseId}-${groupId}`;
+            if (isPostSiwesSemester) {
+                const hours = scheduledHoursByCourseGroup.get(key) || 0;
+                const atMax = hours >= 6;
+                if (atMax) return editingId != null && Number(editingEntryCourseId) === courseId;
+                return true;
+            }
+            if (isSummerSemester) {
+                const hours = scheduledHoursByCourseGroup.get(key) || 0;
+                const atMax = hours >= 2;
+                if (atMax) return editingId != null && Number(editingEntryCourseId) === courseId;
+                return true;
+            }
             const scheduledCount = scheduledCountByCourseGroup.get(key) || 0;
-            const atMaxSlots = scheduledCount >= 2; // each course only twice per week per group
+            const atMaxSlots = scheduledCount >= 2;
             if (atMaxSlots) return editingId != null && Number(editingEntryCourseId) === courseId;
             return true;
         });
-    }, [coursesByLevel, formData.class_group_id, scheduledCountByCourseGroup, editingId, editingEntryCourseId]);
+    }, [coursesByLevel, formData.class_group_id, scheduledCountByCourseGroup, scheduledHoursByCourseGroup, isPostSiwesSemester, isSummerSemester, editingId, editingEntryCourseId]);
 
     // Clear course selection when it's no longer in the list (e.g. just reached 2 slots for this class)
     useEffect(() => {
@@ -299,6 +352,42 @@ export function DepartmentTimetableScheduling({ departmentName, sessionId }: Dep
         const stillAvailable = coursesAvailableForGroup.some((c: any) => Number(c.course_id ?? c.id) === Number(formData.course_id));
         if (!stillAvailable) setFormData((prev) => ({ ...prev, course_id: '' }));
     }, [coursesAvailableForGroup, formData.course_id, formData.class_group_id]);
+
+    const selectedGroupForVenue = formData.class_group_id ? groups.find((g: any) => g.group_id === parseInt(formData.class_group_id, 10)) : null;
+    const classSizeForVenue = Number(selectedGroupForVenue?.student_count ?? 0);
+    const endTimeForSlot = endTimeFromStartAndDuration(formData.start_time, formData.duration);
+    const toMinutes = (t: string) => {
+        const [h, m] = String(t).slice(0, 5).split(':').map(Number);
+        return (h || 0) * 60 + (m || 0);
+    };
+    const suggestedVenues = useMemo(() => {
+        if (!formData.day_of_week || !formData.start_time) return [];
+        const dayNorm = formatDay(formData.day_of_week) || formData.day_of_week;
+        const slotStart = toMinutes(formData.start_time);
+        const slotEnd = toMinutes(endTimeForSlot);
+        const busyVenueIds = new Set<number>();
+        for (const s of schedules) {
+            if (editingId != null && (s.schedule_id === editingId || (s as any).id === editingId)) continue;
+            const entryDay = formatDay((s as any).day_of_week || (s as any).day) || (s as any).day_of_week || '';
+            if (entryDay !== dayNorm) continue;
+            const s2 = toMinutes((s as any).start_time || '');
+            const e2 = toMinutes((s as any).end_time || '');
+            if (slotStart < e2 && slotEnd > s2) busyVenueIds.add(s.venue_id);
+        }
+        const minCapacity = classSizeForVenue > 0 ? classSizeForVenue : 0;
+        return venues
+            .filter((v: any) => {
+                const cap = Number(v.capacity ?? v.size ?? 0);
+                if (minCapacity > 0 && cap < minCapacity) return false;
+                const vid = v.venue_id ?? v.id;
+                return !busyVenueIds.has(vid);
+            })
+            .sort((a: any, b: any) => {
+                const capA = Number(a.capacity ?? a.size ?? 0);
+                const capB = Number(b.capacity ?? b.size ?? 0);
+                return capA - capB;
+            });
+    }, [formData.day_of_week, formData.start_time, formData.duration, formData.class_group_id, schedules, venues, classSizeForVenue, editingId, endTimeForSlot]);
 
     // Show selected lecturer's preferences as text below the lecturer dropdown
     useEffect(() => {
@@ -366,7 +455,8 @@ export function DepartmentTimetableScheduling({ departmentName, sessionId }: Dep
                     return;
                 }
                 if (formData.course_id) {
-                    const hoursRes = await api.checkCourseHoursForGroup(sessionId, parseInt(formData.course_id), parseInt(formData.class_group_id), formData.duration, editingId ?? undefined);
+                    const semesterId = activeSemester?.semester_id ?? undefined;
+                    const hoursRes = await api.checkCourseHoursForGroup(sessionId, parseInt(formData.course_id), parseInt(formData.class_group_id), formData.duration, editingId ?? undefined, semesterId);
                     if (cancelled) return;
                     if (hoursRes?.overLimit) {
                         setConflictValidation({ success: false, error: hoursRes.message || 'This course can only be scheduled twice per week for this class.' });
@@ -415,7 +505,11 @@ export function DepartmentTimetableScheduling({ departmentName, sessionId }: Dep
 
     const selectedCourseForDisplay = courses.find((c: any) => (c.course_id ?? c.id) === parseInt(formData.course_id));
     const dayOrder = { 'Monday': 1, 'Tuesday': 2, 'Wednesday': 3, 'Thursday': 4, 'Friday': 5 };
-    const sortedSchedules = [...schedules].sort((a, b) => {
+    // Per semester: show only this semester's schedules; lecturers and courses stay for the whole session
+    const schedulesForSemester = activeSemesterId != null
+        ? schedules.filter((s: any) => (s.semester_id ?? null) === activeSemesterId)
+        : schedules;
+    const sortedSchedules = [...schedulesForSemester].sort((a, b) => {
         const dayDiff = (dayOrder[a.day_of_week as keyof typeof dayOrder] || 0) - (dayOrder[b.day_of_week as keyof typeof dayOrder] || 0);
         if (dayDiff !== 0) return dayDiff;
         return a.start_time.localeCompare(b.start_time);
@@ -446,7 +540,7 @@ export function DepartmentTimetableScheduling({ departmentName, sessionId }: Dep
                     </CardHeader>
                     <CardContent>
                         <form onSubmit={handleSubmit} className="space-y-4">
-                            {/* Level and Class Group first */}
+                            {/* Level and Class Group first — level and groups come from Class Management */}
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
                                     <Label htmlFor="level">Level *</Label>
@@ -462,6 +556,7 @@ export function DepartmentTimetableScheduling({ departmentName, sessionId }: Dep
                                             <option key={lv} value={lv}>{lv}</option>
                                         ))}
                                     </select>
+                                    <p className="text-xs text-slate-500 mt-1">Levels and groups are set in Class Management.</p>
                                 </div>
                                 <div>
                                     <Label htmlFor="group">Class Group *</Label>
@@ -471,12 +566,16 @@ export function DepartmentTimetableScheduling({ departmentName, sessionId }: Dep
                                         onChange={(e) => setFormData({ ...formData, class_group_id: e.target.value })}
                                         className="w-full px-3 py-2 border rounded-md"
                                         required
+                                        disabled={!formData.level}
                                     >
-                                        <option value="">Select group</option>
+                                        <option value="">{formData.level ? 'Select group' : 'Select level first'}</option>
                                         {groupsByLevel.map((g: any) => (
-                                            <option key={g.group_id} value={g.group_id}>{g.name} ({g.level})</option>
+                                            <option key={g.group_id} value={g.group_id}>{g.name}</option>
                                         ))}
                                     </select>
+                                    {formData.class_group_id && selectedGroupForVenue && (
+                                        <p className="text-xs text-slate-600 mt-1">Class capacity: {selectedGroupForVenue.student_count ?? '—'} students</p>
+                                    )}
                                 </div>
                             </div>
 
@@ -504,8 +603,8 @@ export function DepartmentTimetableScheduling({ departmentName, sessionId }: Dep
                                     )}
                                     {lecturerPreferenceText != null && (
                                         <div className="mt-2 p-2 bg-slate-50 border border-slate-200 rounded-md">
-                                            <p className="text-xs font-medium text-slate-500 mb-1">Preferences:</p>
-                                            <p className="text-sm text-slate-700">{lecturerPreferenceText || 'No preferences set. Set in Lecturer Preferences.'}</p>
+                                            <p className="text-xs font-medium text-slate-500 mb-1">Lecturer preferences:</p>
+                                            <p className="text-sm text-slate-700">{lecturerPreferenceText || 'No preferences set. Set in Lecturer Management.'}</p>
                                         </div>
                                     )}
                                 </div>
@@ -517,8 +616,9 @@ export function DepartmentTimetableScheduling({ departmentName, sessionId }: Dep
                                         onChange={(e) => setFormData({ ...formData, course_id: e.target.value })}
                                         className="w-full px-3 py-2 border rounded-md"
                                         required
+                                        disabled={!formData.level}
                                     >
-                                        <option value="">Select course</option>
+                                        <option value="">{formData.level ? 'Select course' : 'Select level first'}</option>
                                         {coursesAvailableForGroup.map((c: any) => {
                                             const levelStr = formData.level ? String(formData.level) : '';
                                             const groupObj = formData.class_group_id ? groupsByLevel.find((g: any) => g.group_id === parseInt(formData.class_group_id, 10)) : null;
@@ -542,31 +642,18 @@ export function DepartmentTimetableScheduling({ departmentName, sessionId }: Dep
                                             )}
                                         </div>
                                     )}
-                                    <p className="text-xs text-slate-500 mt-1">Each course can only be scheduled twice per week for a group. It disappears from the list once scheduled twice.</p>
+                                    <p className="text-xs text-slate-500 mt-1">
+                                        {isPostSiwesSemester
+                                            ? 'Post-SIWES: each course needs 6 hours total per group. It disappears from the list once 6 hours are scheduled.'
+                                            : isSummerSemester
+                                            ? 'Summer: each course needs 2 hours total per group. It disappears from the list once 2 hours are scheduled.'
+                                            : 'Each course can only be scheduled twice per week for a group. It disappears from the list once scheduled twice.'}
+                                    </p>
                                 </div>
                             </div>
 
-                            <div className="grid grid-cols-2 gap-4">
-                                <div>
-                                    <Label htmlFor="venue">Venue *</Label>
-                                    <select
-                                        id="venue"
-                                        value={formData.venue_id}
-                                        onChange={(e) => setFormData({ ...formData, venue_id: e.target.value })}
-                                        className="w-full px-3 py-2 border rounded-md"
-                                        required
-                                    >
-                                        <option value="">Select venue</option>
-                                        {venues.map(v => (
-                                            <option key={v.venue_id} value={v.venue_id}>{v.name || v.venue_name} (Cap: {v.capacity ?? v.size ?? 0})</option>
-                                        ))}
-                                    </select>
-                                    <p className="text-xs text-slate-500 mt-1">Venues are shared school-wide. Double-bookings for the same day and time are blocked.</p>
-                                </div>
-                                <div />
-                            </div>
-
-                            <div className="grid grid-cols-3 gap-4">
+                            {/* Day, Start time, Duration – before venue so venue suggestions can use this slot */}
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                 <div>
                                     <Label htmlFor="day">Day *</Label>
                                     <select
@@ -606,6 +693,45 @@ export function DepartmentTimetableScheduling({ departmentName, sessionId }: Dep
                                             <option key={d.value} value={d.value}>{d.label}</option>
                                         ))}
                                     </select>
+                                </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 gap-4">
+                                <div>
+                                    <Label htmlFor="venue">Venue *</Label>
+                                    <select
+                                        id="venue"
+                                        value={formData.venue_id}
+                                        onChange={(e) => setFormData({ ...formData, venue_id: e.target.value })}
+                                        className="w-full px-3 py-2 border rounded-md"
+                                        required
+                                    >
+                                        <option value="">Select venue</option>
+                                        {venues.map(v => (
+                                            <option key={v.venue_id} value={v.venue_id}>{v.name || v.venue_name} (Cap: {v.capacity ?? v.size ?? 0})</option>
+                                        ))}
+                                    </select>
+                                    <p className="text-xs text-slate-500 mt-1">Venues are shared school-wide. Double-bookings for the same day and time are blocked.</p>
+                                    {formData.day_of_week && formData.start_time && (formData.class_group_id || selectedGroupForVenue) && (
+                                        <div className="mt-2 p-2 bg-slate-50 border border-slate-200 rounded-md">
+                                            <p className="text-xs font-medium text-slate-500 mb-1">Venue suggestions (available for {formatDay(formData.day_of_week)} {formData.start_time.slice(0, 5)}–{endTimeForSlot.slice(0, 5)}, capacity ≥ class size):</p>
+                                            {suggestedVenues.length === 0 ? (
+                                                <p className="text-sm text-slate-600">No venues free at this time{classSizeForVenue > 0 ? ` with capacity ≥ ${classSizeForVenue}` : ''}. Try another day or time.</p>
+                                            ) : (
+                                                <ul className="text-sm text-slate-700 list-disc list-inside space-y-0.5">
+                                                    {suggestedVenues.slice(0, 10).map((v: any) => (
+                                                        <li key={v.venue_id ?? v.id}>
+                                                            <strong>{v.name || v.venue_name}</strong> (Capacity: {v.capacity ?? v.size ?? 0})
+                                                            {formData.venue_id && Number(formData.venue_id) === Number(v.venue_id ?? v.id) && ' ✓ selected'}
+                                                        </li>
+                                                    ))}
+                                                    {suggestedVenues.length > 10 && (
+                                                        <li className="text-slate-500">+{suggestedVenues.length - 10} more</li>
+                                                    )}
+                                                </ul>
+                                            )}
+                                        </div>
+                                    )}
                                 </div>
                             </div>
 

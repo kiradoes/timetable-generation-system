@@ -1,5 +1,4 @@
 import {
-  Activity,
   BookOpen,
   Clock,
   GraduationCap,
@@ -11,7 +10,6 @@ import api from '../services/api';
 import { DashboardLayout } from './DashboardLayout';
 import { DepartmentClassGroupsManagement } from './DepartmentClassGroupsManagement';
 import { DepartmentCoursesManagement } from './DepartmentCoursesManagement';
-import { DepartmentLecturerPreferences } from './DepartmentLecturerPreferences';
 import { DepartmentLecturersManagement } from './DepartmentLecturersManagement';
 import { DepartmentTimetableScheduling } from './DepartmentTimetableScheduling';
 import { DepartmentVenuesManagement } from './DepartmentVenuesManagement';
@@ -33,7 +31,7 @@ export function DepartmentOfficerDashboard({
   const [activeView, setActiveView] = useState('overview');
   const [departmentName, setDepartmentName] = useState(userDepartment?.trim() || '');
   const [activeSession, setActiveSession] = useState<{ session_id: number; name: string } | null>(null);
-  const [activeSemester, setActiveSemester] = useState<{ name: string } | null>(null);
+  const [activeSemester, setActiveSemester] = useState<{ name: string; semester_id?: number } | null>(null);
 
   const hydrateActiveSession = async () => {
     try {
@@ -44,7 +42,7 @@ export function DepartmentOfficerDashboard({
         const semRes = await api.getSemestersBySession(session.session_id);
         if (semRes.success && Array.isArray(semRes.data) && semRes.data.length > 0) {
           const active = (semRes.data as any[]).find((s: any) => s.status === 'active') || semRes.data[0];
-          setActiveSemester({ name: active.name });
+          setActiveSemester({ name: active.name, semester_id: active.semester_id ?? active.id });
         } else {
           setActiveSemester(null);
         }
@@ -63,7 +61,7 @@ export function DepartmentOfficerDashboard({
           const semRes = await api.getSemestersBySession(current.session_id);
           if (semRes.success && Array.isArray(semRes.data) && semRes.data.length > 0) {
             const active = (semRes.data as any[]).find((s: any) => s.status === 'active') || semRes.data[0];
-            setActiveSemester({ name: active.name });
+            setActiveSemester({ name: active.name, semester_id: active.semester_id ?? active.id });
           } else {
             setActiveSemester(null);
           }
@@ -140,10 +138,8 @@ export function DepartmentOfficerDashboard({
         return <DepartmentCoursesManagement departmentName={effectiveDepartment} sessionId={activeSession?.session_id || null} />;
       case 'venues-management':
         return <DepartmentVenuesManagement departmentName={effectiveDepartment} sessionId={activeSession?.session_id || null} />;
-      case 'lecturer-preferences':
-        return <DepartmentLecturerPreferences departmentName={effectiveDepartment} sessionId={activeSession?.session_id || null} />;
       case 'timetable-scheduling':
-        return <DepartmentTimetableScheduling departmentName={effectiveDepartment} sessionId={activeSession?.session_id || null} />;
+        return <DepartmentTimetableScheduling departmentName={effectiveDepartment} sessionId={activeSession?.session_id || null} activeSemester={activeSemester} />;
       default:
         return <OverviewView userDepartment={effectiveDepartment} activeSession={activeSession?.name || ''} activeSemester={activeSemester?.name} />;
     }
@@ -162,8 +158,6 @@ export function DepartmentOfficerDashboard({
   );
 }
 
-type ActivityItem = { full_name: string; department: string; description: string };
-
 function OverviewView({
   userDepartment,
   activeSession,
@@ -175,31 +169,6 @@ function OverviewView({
   activeSemester?: string | null;
   onNavigate?: (view: string) => void;
 }) {
-  const [recentActivities, setRecentActivities] = useState<ActivityItem[]>([]);
-  const [activityFilter, setActivityFilter] = useState<'all' | 'schedules' | 'other'>('all');
-
-  useEffect(() => {
-    const fetchActivities = async () => {
-      try {
-        const res = await api.getRecentOfficerActivities(20, { department: userDepartment || undefined });
-        if (res.success && Array.isArray(res.data)) {
-          setRecentActivities(res.data);
-        }
-      } catch (e) {
-        console.error('Failed to fetch recent activity:', e);
-      }
-    };
-    fetchActivities();
-  }, [userDepartment]);
-
-  const filteredActivities = recentActivities.filter((item) => {
-    if (activityFilter === 'all') return true;
-    const d = (item.description || '').toLowerCase();
-    const isSchedule = d.includes('scheduled') || d.includes('schedule') || d.includes('removed schedule') || d.includes('updated schedule');
-    if (activityFilter === 'schedules') return isSchedule;
-    return !isSchedule;
-  });
-
   const sessionSemesterLabel = activeSession
     ? activeSemester
       ? `${activeSession.replace(/-/g, '/')} · ${activeSemester}`
@@ -269,52 +238,6 @@ function OverviewView({
               </>
             )}
           </div>
-        </CardContent>
-      </Card>
-
-      <Card className="shadow-md">
-        <CardHeader>
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-            <div>
-              <CardTitle className="flex items-center gap-2 text-[#0f2044]">
-                <Activity className="size-5 text-[#ffb71b]" />
-                Recent activity
-              </CardTitle>
-              <p className="text-sm text-slate-600 mt-1">Schedule creations and other activity from officers</p>
-            </div>
-            <div className="flex items-center gap-2">
-              <label htmlFor="activity-filter" className="text-sm font-medium text-slate-700 whitespace-nowrap">Filter:</label>
-              <select
-                id="activity-filter"
-                value={activityFilter}
-                onChange={(e) => setActivityFilter(e.target.value as 'all' | 'schedules' | 'other')}
-                className="px-3 py-1.5 border border-slate-300 rounded-md text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#ffb71b] focus:border-transparent"
-              >
-                <option value="all">All activity</option>
-                <option value="schedules">Schedules only</option>
-                <option value="other">Other</option>
-              </select>
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent>
-          {filteredActivities.length === 0 ? (
-            <p className="text-slate-500 py-4">No recent activity to show.</p>
-          ) : (
-            <ul className="space-y-3">
-              {filteredActivities.map((item, i) => (
-                <li key={i} className="flex items-start gap-3 py-2 border-b border-slate-100 last:border-0">
-                  <div className="size-9 rounded-full bg-[#0f2044]/10 flex items-center justify-center flex-shrink-0">
-                    <Users className="size-4 text-[#0f2044]" />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="font-medium text-[#0f2044]">{item.full_name}</p>
-                    <p className="text-sm text-slate-600 mt-0.5">{item.description}</p>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
         </CardContent>
       </Card>
     </div>

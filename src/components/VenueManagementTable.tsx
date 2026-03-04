@@ -96,7 +96,7 @@ export function VenueManagementTable() {
                   placeholder="Search by name, building, or type..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-10 border-slate-300 focus:border-[#0f2044] focus:ring-[#0f2044]"
+                  className="pl-14 border-slate-300 focus:border-[#0f2044] focus:ring-[#0f2044]"
                 />
               </div>
               <Badge variant="outline" className="bg-slate-100 px-4 py-2">

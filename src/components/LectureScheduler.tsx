@@ -87,15 +87,6 @@ function formatDay(day: string | null | undefined): string {
     return days[d] ?? d.charAt(0).toUpperCase() + d.slice(1);
 }
 
-function formatClassDisplay(level: string | number | null | undefined, groupName: string | null | undefined): string {
-    const l = level != null && String(level).trim() !== '' ? String(level).trim() : '';
-    const g = groupName != null && String(groupName).trim() !== '' ? String(groupName).trim() : '';
-    if (!l && !g) return '—';
-    if (!l) return g;
-    if (!g) return `${l}L`;
-    return `${l}L ${g}`;
-}
-
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
 const DURATIONS = [
     { value: 1, label: '1 Hour' },
@@ -294,7 +285,8 @@ export default function LectureScheduler({ activeSession: propsSession, activeSe
         const sessionId = activeSession?.session_id ?? activeSession?.id;
         if (validation_result.success && sessionId && course_id && class_group_id) {
             try {
-                const hoursRes = await api.checkCourseHoursForGroup(sessionId, Number(course_id), Number(class_group_id), duration, editingId ?? undefined);
+                const semesterId = activeSemester?.semester_id ?? activeSemester?.id ?? undefined;
+                const hoursRes = await api.checkCourseHoursForGroup(sessionId, Number(course_id), Number(class_group_id), duration, editingId ?? undefined, semesterId);
                 if (hoursRes.overLimit) {
                     validation_result.success = false;
                     validation_result.error = (validation_result.error || '') + (validation_result.error ? ' ' : '') + (hoursRes.message || 'This course can only be scheduled twice per week for this group.');
@@ -309,6 +301,15 @@ export default function LectureScheduler({ activeSession: propsSession, activeSe
                 if (conflictRes?.conflict) {
                     validation_result.success = false;
                     validation_result.error = (validation_result.error || '') + (conflictRes.message || 'This venue is already booked for that day and time.');
+                }
+            } catch (_) {}
+        }
+        if (validation_result.success && sessionId && lecturer_id) {
+            try {
+                const lecturerConflictRes = await (api as any).checkLecturerTimeConflict(sessionId, Number(lecturer_id), day, start_time, endTimeStr, editingId ?? undefined);
+                if (lecturerConflictRes?.conflict) {
+                    validation_result.success = false;
+                    validation_result.error = (validation_result.error || '') + (lecturerConflictRes.message || 'This lecturer is already scheduled at that time.');
                 }
             } catch (_) {}
         }
@@ -415,7 +416,8 @@ export default function LectureScheduler({ activeSession: propsSession, activeSe
             return;
         }
 
-        const hoursRes = await api.checkCourseHoursForGroup(sessionId, Number(course_id), Number(class_group_id), duration, editingId ?? undefined);
+        const semesterId = activeSemester?.semester_id ?? activeSemester?.id ?? undefined;
+        const hoursRes = await api.checkCourseHoursForGroup(sessionId, Number(course_id), Number(class_group_id), duration, editingId ?? undefined, semesterId);
         if (hoursRes.overLimit) {
             toast.error(hoursRes.message || 'This course can only be scheduled twice per week for this class group.');
             return;
@@ -423,6 +425,7 @@ export default function LectureScheduler({ activeSession: propsSession, activeSe
 
         setLoading(true);
         try {
+            const semesterId = activeSemester?.semester_id ?? activeSemester?.id;
             const scheduleData: any = {
                 session_id: sessionId,
                 lecturer_id: Number(lecturer_id),
@@ -434,6 +437,7 @@ export default function LectureScheduler({ activeSession: propsSession, activeSe
                 end_time: endTimeStr,
                 duration_hours: duration,
             };
+            if (semesterId != null) scheduleData.semester_id = semesterId;
             if (!editingId) scheduleData.created_by_role = 'school-officer';
 
             let response;
@@ -518,7 +522,7 @@ export default function LectureScheduler({ activeSession: propsSession, activeSe
         setValidation(null);
     };
 
-    // Level options from class groups in DB (no hardcoded levels)
+    // Level options: always include 100–400, plus any from class groups
     const levelsFromDb = useMemo(() => {
         const set = new Set<string>();
         classGroups.forEach((g) => {
@@ -526,20 +530,53 @@ export default function LectureScheduler({ activeSession: propsSession, activeSe
         });
         return Array.from(set).sort((a, b) => Number(a) - Number(b));
     }, [classGroups]);
+    const levelOptions = useMemo(
+        () => [...new Set(['100', '200', '300', '400', ...levelsFromDb])].sort((a, b) => Number(a) - Number(b)),
+        [levelsFromDb]
+    );
 
     const classGroupsByLevel = level ? classGroups.filter((g) => String(g.level) === String(level)) : classGroups;
     const coursesByLevel = level ? courses.filter((c) => String((c as any).level) === String(level)) : courses;
 
-    // Each course can only be scheduled twice per week per group. Courses disappear once scheduled twice.
+    const isPostSiwesSemester = Boolean(
+        activeSemester?.name && String(activeSemester.name).toLowerCase().includes('post-siwes')
+    );
+    const isSummerSemester = Boolean(
+        activeSemester?.name && String(activeSemester.name).toLowerCase().includes('summer')
+    );
+    const activeSemesterId = activeSemester?.semester_id ?? activeSemester?.id ?? null;
+    // Count only entries in the active semester so Summer/Post-SIWES hours are per semester
+    const entriesForCounting = activeSemesterId != null
+        ? timetableEntries.filter((e) => (e as any).semester_id === activeSemesterId)
+        : timetableEntries;
+
+    const hoursBetween = (start: string, end: string) => {
+        const [sh, sm] = (start || '0:0').slice(0, 5).split(':').map(Number);
+        const [eh, em] = (end || '0:0').slice(0, 5).split(':').map(Number);
+        return (eh - sh) + (em - sm) / 60;
+    };
+
+    // First/Second: slot count per (course, group). Summer: 2 hrs. Post-SIWES: 6 hrs per (course, group).
     const scheduledCountByCourseGroup = useMemo(() => {
         const map = new Map<string, number>();
-        for (const e of timetableEntries) {
-            if (editingId != null && e.id === editingId) continue; // exclude entry being edited so course stays in list
+        for (const e of entriesForCounting) {
+            if (editingId != null && e.id === editingId) continue;
             const key = `${Number(e.course_id)}-${Number(e.class_group_id)}`;
             map.set(key, (map.get(key) || 0) + 1);
         }
         return map;
-    }, [timetableEntries, editingId]);
+    }, [entriesForCounting, editingId]);
+
+    const scheduledHoursByCourseGroup = useMemo(() => {
+        const map = new Map<string, number>();
+        for (const e of entriesForCounting) {
+            if (editingId != null && e.id === editingId) continue;
+            const key = `${Number(e.course_id)}-${Number(e.class_group_id)}`;
+            const hrs = hoursBetween(e.start_time || '', e.end_time || '');
+            map.set(key, (map.get(key) || 0) + hrs);
+        }
+        return map;
+    }, [entriesForCounting, editingId]);
 
     const editingEntryCourseId = editingId ? timetableEntries.find((e) => e.id === editingId)?.course_id : null;
 
@@ -569,12 +606,24 @@ export default function LectureScheduler({ activeSession: propsSession, activeSe
             const courseId = Number((c as any).course_id ?? c.id);
             const groupId = Number(class_group_id);
             const key = `${courseId}-${groupId}`;
+            if (isPostSiwesSemester) {
+                const hours = scheduledHoursByCourseGroup.get(key) || 0;
+                const atMax = hours >= 6;
+                if (atMax) return editingId != null && Number(editingEntryCourseId) === courseId;
+                return true;
+            }
+            if (isSummerSemester) {
+                const hours = scheduledHoursByCourseGroup.get(key) || 0;
+                const atMax = hours >= 2;
+                if (atMax) return editingId != null && Number(editingEntryCourseId) === courseId;
+                return true;
+            }
             const scheduledCount = scheduledCountByCourseGroup.get(key) || 0;
-            const atMaxSlots = scheduledCount >= 2; // each course only twice per week per group
+            const atMaxSlots = scheduledCount >= 2;
             if (atMaxSlots) return editingId != null && Number(editingEntryCourseId) === courseId;
             return true;
         });
-    }, [coursesByLevel, class_group_id, scheduledCountByCourseGroup, course_id, editingId, editingEntryCourseId]);
+    }, [coursesByLevel, class_group_id, scheduledCountByCourseGroup, scheduledHoursByCourseGroup, isPostSiwesSemester, isSummerSemester, course_id, editingId, editingEntryCourseId]);
 
     // Clear course selection when it's no longer in the list (e.g. just reached 2 slots for this class)
     useEffect(() => {
@@ -588,6 +637,65 @@ export default function LectureScheduler({ activeSession: propsSession, activeSe
     const selectedClass = classGroups.find((c) => c.id === class_group_id);
     const selectedVenue = venues.find((v) => v.id === venue_id);
 
+    const classSize = selectedClass?.student_count ?? 0;
+    const endTimeStrForSlot = (() => {
+        const [h, m] = (start_time || '09:00').slice(0, 5).split(':').map(Number);
+        const totalMins = (h || 0) * 60 + (m || 0) + Math.round((duration || 1) * 60);
+        const eh = Math.floor(totalMins / 60) % 24;
+        const em = totalMins % 60;
+        return `${String(eh).padStart(2, '0')}:${String(em).padStart(2, '0')}`;
+    })();
+    const toMinutes = (t: string) => {
+        const [h, m] = String(t).slice(0, 5).split(':').map(Number);
+        return (h || 0) * 60 + (m || 0);
+    };
+    const slotStartMins = toMinutes(start_time);
+    const slotEndMins = toMinutes(endTimeStrForSlot);
+    const suggestedVenues = useMemo(() => {
+        const dayNorm = formatDay(day) || day || '';
+        const busyVenueIds = new Set<number>();
+        for (const e of timetableEntries) {
+            if (editingId != null && (e.id === editingId || (e as any).schedule_id === editingId)) continue;
+            const entryDay = formatDay(e.day) || (e.day as string) || '';
+            if (entryDay !== dayNorm) continue;
+            const s2 = toMinutes(e.start_time || '');
+            const e2 = toMinutes(e.end_time || '');
+            if (slotStartMins < e2 && slotEndMins > s2) busyVenueIds.add(e.venue_id);
+        }
+        const minCapacity = classSize > 0 ? classSize : 0;
+        return venues
+            .filter((v) => {
+                const cap = Number((v as any).capacity ?? (v as any).size ?? 0);
+                if (minCapacity > 0 && cap < minCapacity) return false;
+                return !busyVenueIds.has(v.id);
+            })
+            .sort((a, b) => {
+                const capA = Number((a as any).capacity ?? (a as any).size ?? 0);
+                const capB = Number((b as any).capacity ?? (b as any).size ?? 0);
+                return capA - capB;
+            });
+    }, [day, start_time, duration, timetableEntries, venues, classSize, editingId, slotStartMins, slotEndMins]);
+
+    const dayOrder = (d: string) => {
+        const i = DAYS.indexOf(d || '');
+        return i >= 0 ? i : 999;
+    };
+    const sortedEntries = useMemo(
+        () =>
+            [...timetableEntries].sort((a, b) => {
+                const dayA = dayOrder(formatDay(a.day) || (a.day as string));
+                const dayB = dayOrder(formatDay(b.day) || (b.day as string));
+                if (dayA !== dayB) return dayA - dayB;
+                const lvA = String(a.group_level ?? '');
+                const lvB = String(b.group_level ?? '');
+                if (lvA !== lvB) return Number(lvA) - Number(lvB);
+                const deptA = (a.group_department ?? '').toLowerCase();
+                const deptB = (b.group_department ?? '').toLowerCase();
+                return deptA.localeCompare(deptB);
+            }),
+        [timetableEntries]
+    );
+
     const sessionSemesterLabel = activeSession && activeSemester
         ? `${(activeSession.name || '').replace(/-/g, '/')} · ${activeSemester.name || 'Semester'}`
         : activeSession ? (activeSession.name || '').replace(/-/g, '/') : null;
@@ -595,8 +703,35 @@ export default function LectureScheduler({ activeSession: propsSession, activeSe
     const timetablePublished = activeSemester?.timetable_status === 'published';
     const schedulingDisabled = noActiveSessionOrSemester;
 
-    // Finalize allowed only when every course (for this session) has at least one schedule
+    // Finalize: First/Second = every course scheduled at least once; Summer = 2 hrs per (course, class); Post-SIWES = 6 hrs (checked by canPublishSemester)
+    const requiredHoursForSemester = isPostSiwesSemester ? 6 : isSummerSemester ? 2 : null;
     const { allCoursesScheduled, scheduledCount, totalCount, missingCount } = useMemo(() => {
+        if (requiredHoursForSemester != null) {
+            const requiredPairs = new Set<string>();
+            for (const g of classGroups) {
+                for (const c of allCoursesForSession) {
+                    if ((c as any).category === 'GEDS' || (c as any).category === 'SAT') continue;
+                    const cDept = (c as any).department ?? '';
+                    const gDept = g.department_name ?? g.department ?? '';
+                    if (cDept !== gDept) continue;
+                    if (g.level != null && (c as any).level != null && String(g.level) !== String((c as any).level)) continue;
+                    requiredPairs.add(`${g.id}-${c.id}`);
+                }
+            }
+            let cleared = 0;
+            for (const key of requiredPairs) {
+                const [gId, cId] = key.split('-').map(Number);
+                const hours = scheduledHoursByCourseGroup.get(`${cId}-${gId}`) || 0;
+                if (hours >= requiredHoursForSemester) cleared++;
+            }
+            const total = requiredPairs.size;
+            return {
+                allCoursesScheduled: total > 0 && cleared === total,
+                scheduledCount: cleared,
+                totalCount: total,
+                missingCount: total - cleared,
+            };
+        }
         const allIds = new Set(allCoursesForSession.map((c) => c.id));
         const scheduledIds = new Set(timetableEntries.map((e) => e.course_id));
         const total = allIds.size;
@@ -608,7 +743,7 @@ export default function LectureScheduler({ activeSession: propsSession, activeSe
             totalCount: total,
             missingCount: missing,
         };
-    }, [allCoursesForSession, timetableEntries]);
+    }, [allCoursesForSession, timetableEntries, requiredHoursForSemester, classGroups, scheduledHoursByCourseGroup]);
 
     return (
         <div className="space-y-6 p-6">
@@ -631,8 +766,17 @@ export default function LectureScheduler({ activeSession: propsSession, activeSe
             {noActiveSessionOrSemester && (
                 <Card className="border-amber-200 bg-amber-50">
                     <CardContent className="p-6">
-                        <p className="text-amber-800 font-medium">No active session or semester</p>
-                        <p className="text-sm text-amber-700 mt-1">You cannot schedule when there is no active session and semester. Set the current session and an active semester in <strong>Academic Settings</strong>.</p>
+                        {!activeSession ? (
+                            <>
+                                <p className="text-amber-800 font-medium">No session is active</p>
+                                <p className="text-sm text-amber-700 mt-1">Create a session in <strong>Academic Settings</strong> to schedule a lecture. Schedules are stored per session.</p>
+                            </>
+                        ) : (
+                            <>
+                                <p className="text-amber-800 font-medium">No active semester</p>
+                                <p className="text-sm text-amber-700 mt-1">Start a semester (First, Second, or Post-SIWES) in <strong>Academic Settings</strong> to schedule a lecture.</p>
+                            </>
+                        )}
                     </CardContent>
                 </Card>
             )}
@@ -652,35 +796,6 @@ export default function LectureScheduler({ activeSession: propsSession, activeSe
 
             {!schedulingDisabled ? (
             <>
-            {/* Summary – show only before any schedule is created (revert: hide after schedules exist) */}
-            {timetableEntries.length === 0 && (
-                <Card className="border border-slate-200 shadow-md">
-                    <CardHeader className="bg-gradient-to-r from-[#0f2044] to-[#1a3a5c] text-white rounded-t-lg">
-                        <CardTitle className="flex items-center gap-2 text-base">
-                            <Calendar className="w-5 h-5" />
-                            Summary – before creating schedule
-                        </CardTitle>
-                    </CardHeader>
-                    <CardContent className="p-6">
-                        <p className="text-sm text-slate-600 mb-3">Fill the form below and click Create Schedule. Once you add schedules, this summary is hidden and the table shows your scheduled lectures.</p>
-                        <div className="space-y-3 max-h-64 overflow-y-auto">
-                            {timetableEntries.map((entry) => (
-                                <div key={entry.id} className="p-3 bg-white border border-slate-200 rounded-lg shadow-sm">
-                                    <div className="space-y-1 text-sm text-slate-600">
-                                        <p><span className="font-medium text-slate-700">Level:</span> {entry.group_level != null ? entry.group_level : '—'}</p>
-                                        <p><span className="font-medium text-slate-700">Lecturer:</span> {entry.lecturer_name ?? '—'}</p>
-                                        <p><span className="font-medium text-slate-700">Course:</span> {entry.course_code ?? '—'}</p>
-                                        <p><span className="font-medium text-slate-700">Class:</span> {formatClassDisplay(entry.group_level, entry.class_name)}</p>
-                                        <p><span className="font-medium text-slate-700">Venue:</span> {entry.venue_name ?? '—'}</p>
-                                        <p><span className="font-medium text-slate-700">Time:</span> {formatDay(entry.day)}, {entry.start_time} – {entry.end_time}</p>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    </CardContent>
-                </Card>
-            )}
-
             <Card className="border border-slate-200 shadow-md">
                 <CardHeader className="bg-gradient-to-r from-[#0f2044] to-[#1a3a5c] text-white rounded-t-lg">
                     <CardTitle className="flex items-center gap-2">
@@ -690,7 +805,25 @@ export default function LectureScheduler({ activeSession: propsSession, activeSe
                 </CardHeader>
                 <CardContent className="p-6">
                     <form onSubmit={handleSubmit} className="space-y-6">
-                        {/* Row 0: Department (first – lecturers, courses, level, class group depend on it) */}
+                        {/* Row 0: Day (first) */}
+                        <div>
+                            <label className="block text-sm font-medium text-slate-700 mb-2">
+                                Day *
+                            </label>
+                            <select
+                                value={day}
+                                onChange={(e) => setDay(e.target.value)}
+                                className="w-full max-w-md px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#ffb71b] focus:border-transparent"
+                            >
+                                {DAYS.map((d) => (
+                                    <option key={d} value={d}>
+                                        {d}
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+
+                        {/* Row 1: Department */}
                         <div>
                             <label className="block text-sm font-medium text-slate-700 mb-2">
                                 Department *
@@ -706,10 +839,10 @@ export default function LectureScheduler({ activeSession: propsSession, activeSe
                                     <option key={d.department_id ?? d.name} value={d.name}>{d.name}</option>
                                 ))}
                             </select>
-                            <p className="text-xs text-slate-500 mt-1">Lecturers, courses, level and class group are from the selected department.</p>
+                            <p className="text-xs text-slate-500 mt-1">Lecturers, courses, level and group are from the selected department.</p>
                         </div>
 
-                        {/* Row 1: Level and Class Group (first) */}
+                        {/* Row 2: Level and Group */}
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div>
                                 <label className="block text-sm font-medium text-slate-700 mb-2">
@@ -722,7 +855,7 @@ export default function LectureScheduler({ activeSession: propsSession, activeSe
                                     required
                                 >
                                     <option value="">Select Level</option>
-                                    {levelsFromDb.map((lv) => (
+                                    {levelOptions.map((lv) => (
                                         <option key={lv} value={lv}>{lv}</option>
                                     ))}
                                 </select>
@@ -730,7 +863,7 @@ export default function LectureScheduler({ activeSession: propsSession, activeSe
 
                             <div>
                                 <label className="block text-sm font-medium text-slate-700 mb-2">
-                                    Class Group *
+                                    Group *
                                 </label>
                                 <select
                                     value={class_group_id}
@@ -738,13 +871,17 @@ export default function LectureScheduler({ activeSession: propsSession, activeSe
                                     className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#ffb71b] focus:border-transparent"
                                     required
                                 >
-                                    <option value="">Select Class Group</option>
+                                    <option value="">Select Group</option>
                                     {classGroupsByLevel.map((group) => (
                                         <option key={group.id} value={group.id}>
-                                            {group.department_name ?? group.department ?? 'Unassigned'} - {group.level} - {group.name} ({group.student_count} students)
+                                            {group.name}
                                         </option>
                                     ))}
                                 </select>
+                                <p className="text-xs text-slate-500 mt-1">Shows A or B for the class group.</p>
+                                {class_group_id && selectedClass && (
+                                    <p className="text-xs text-slate-600 mt-1">Class capacity: {selectedClass.student_count ?? '—'} students</p>
+                                )}
                             </div>
                         </div>
 
@@ -803,50 +940,17 @@ export default function LectureScheduler({ activeSession: propsSession, activeSe
                                         )}
                                     </div>
                                 )}
-                                <p className="text-xs text-slate-500 mt-1">Each course can only be scheduled twice per week for a group. It disappears from the list once scheduled twice.</p>
+                                <p className="text-xs text-slate-500 mt-1">
+                                    {isPostSiwesSemester
+                                        ? 'Post-SIWES: each course needs 6 hours total per group. It disappears from the list once 6 hours are scheduled.'
+                                        : isSummerSemester
+                                        ? 'Summer: each course needs 2 hours total per group. It disappears from the list once 2 hours are scheduled.'
+                                        : 'Each course can only be scheduled twice per week for a group. It disappears from the list once scheduled twice.'}
+                                </p>
                             </div>
                         </div>
-
-                        {/* Row 3: Venue */}
-                        <div>
-                            <label className="block text-sm font-medium text-slate-700 mb-2">
-                                Venue *
-                            </label>
-                                <select
-                                    value={venue_id}
-                                    onChange={(e) => setVenueId(e.target.value ? Number(e.target.value) : '')}
-                                    className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#ffb71b] focus:border-transparent"
-                                    required
-                                >
-                                    <option value="">Select Venue</option>
-                                    {venues.map((venue) => (
-                                        <option key={venue.id} value={venue.id}>
-                                            {venue.name} (Capacity: {venue.size ?? venue.capacity ?? 0})
-                                        </option>
-                                    ))}
-                                </select>
-                                <p className="text-xs text-slate-500 mt-1">Venues are shared school-wide. If a venue is already booked for the same day and time, you’ll see an error. Choose another venue or time.</p>
-                        </div>
-
-                        {/* Row 4: Day, Start Time, Duration */}
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                            <div>
-                                <label className="block text-sm font-medium text-slate-700 mb-2">
-                                    Day *
-                                </label>
-                                <select
-                                    value={day}
-                                    onChange={(e) => setDay(e.target.value)}
-                                    className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#ffb71b] focus:border-transparent"
-                                >
-                                    {DAYS.map((d) => (
-                                        <option key={d} value={d}>
-                                            {d}
-                                        </option>
-                                    ))}
-                                </select>
-                            </div>
-
+                        {/* Start Time, Duration */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div>
                                 <label className="block text-sm font-medium text-slate-700 mb-2">
                                     Start Time (24h format) *
@@ -878,6 +982,47 @@ export default function LectureScheduler({ activeSession: propsSession, activeSe
                                     ))}
                                 </select>
                             </div>
+                        </div>
+
+                        {/* Venue (last – uses day, group and time for suggested venues) */}
+                        <div>
+                            <label className="block text-sm font-medium text-slate-700 mb-2">
+                                Venue *
+                            </label>
+                            <select
+                                value={venue_id}
+                                onChange={(e) => setVenueId(e.target.value ? Number(e.target.value) : '')}
+                                className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#ffb71b] focus:border-transparent"
+                                required
+                            >
+                                <option value="">Select Venue</option>
+                                {venues.map((venue) => (
+                                    <option key={venue.id} value={venue.id}>
+                                        {venue.name} (Capacity: {venue.size ?? venue.capacity ?? 0})
+                                    </option>
+                                ))}
+                            </select>
+                            <p className="text-xs text-slate-500 mt-1">Set day, group and time first so suggested venues show below. Venues are shared school-wide.</p>
+                            {(day && start_time && (class_group_id || selectedClass)) && (
+                                <div className="mt-2 p-2 bg-slate-50 border border-slate-200 rounded-md">
+                                    <p className="text-xs font-medium text-slate-500 mb-1">Suggested venues (available for {formatDay(day)} {start_time}–{endTimeStrForSlot}, capacity ≥ class size):</p>
+                                    {suggestedVenues.length === 0 ? (
+                                        <p className="text-sm text-slate-600">No venues free at this time{Number(classSize) > 0 ? ` with capacity ≥ ${classSize}` : ''}. Try another day or time.</p>
+                                    ) : (
+                                        <ul className="text-sm text-slate-700 list-disc list-inside space-y-0.5">
+                                            {suggestedVenues.slice(0, 10).map((v) => (
+                                                <li key={v.id}>
+                                                    <strong>{v.name}</strong> (Capacity: {(v as any).size ?? (v as any).capacity ?? 0})
+                                                    {venue_id === v.id && ' ✓ selected'}
+                                                </li>
+                                            ))}
+                                            {suggestedVenues.length > 10 && (
+                                                <li className="text-slate-500">+{suggestedVenues.length - 10} more</li>
+                                            )}
+                                        </ul>
+                                    )}
+                                </div>
+                            )}
                         </div>
 
                         {/* Validation Status */}
@@ -931,7 +1076,7 @@ export default function LectureScheduler({ activeSession: propsSession, activeSe
                                         {selectedCourse.title}
                                     </p>
                                     <p>
-                                        <span className="font-medium">Class:</span> {formatClassDisplay(selectedClass.level, selectedClass.name)}
+                                        <span className="font-medium">Group:</span> {selectedClass.name}
                                         {selectedClass.student_count != null && (
                                             <span className="text-slate-600"> ({selectedClass.student_count} students)</span>
                                         )}
@@ -999,29 +1144,27 @@ export default function LectureScheduler({ activeSession: propsSession, activeSe
                             <table className="w-full text-sm">
                                 <thead>
                                     <tr className="border-b border-slate-200">
-                                        <th className="text-left py-3 px-4 font-semibold text-[#0f2044]">Department</th>
+                                        <th className="text-left py-3 px-4 font-semibold text-[#0f2044]">Day</th>
                                         <th className="text-left py-3 px-4 font-semibold text-[#0f2044]">Level</th>
+                                        <th className="text-left py-3 px-4 font-semibold text-[#0f2044]">Department</th>
                                         <th className="text-left py-3 px-4 font-semibold text-[#0f2044]">Lecturer</th>
                                         <th className="text-left py-3 px-4 font-semibold text-[#0f2044]">Course</th>
-                                        <th className="text-left py-3 px-4 font-semibold text-[#0f2044]">Class</th>
+                                        <th className="text-left py-3 px-4 font-semibold text-[#0f2044]">Group</th>
                                         <th className="text-left py-3 px-4 font-semibold text-[#0f2044]">Venue</th>
-                                        <th className="text-left py-3 px-4 font-semibold text-[#0f2044]">Day</th>
                                         <th className="text-left py-3 px-4 font-semibold text-[#0f2044]">Time</th>
                                         <th className="text-right py-3 px-4 font-semibold text-[#0f2044]">Actions</th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {timetableEntries.map((entry) => (
+                                    {sortedEntries.map((entry) => (
                                         <tr key={entry.id} className="border-b border-slate-200 hover:bg-slate-50">
-                                            <td className="px-4 py-3 text-slate-900 font-medium">{entry.group_department ?? '—'}</td>
+                                            <td className="px-4 py-3 text-slate-900 font-medium">{formatDay(entry.day)}</td>
                                             <td className="px-4 py-3 text-slate-900">{entry.group_level != null ? entry.group_level : '—'}</td>
+                                            <td className="px-4 py-3 text-slate-900 font-medium">{entry.group_department ?? '—'}</td>
                                             <td className="px-4 py-3 text-slate-900">{entry.lecturer_name}</td>
                                             <td className="px-4 py-3 text-slate-900">{entry.course_code}</td>
-                                            <td className="px-4 py-3 text-slate-900">{formatClassDisplay(entry.group_level, entry.class_name)}</td>
+                                            <td className="px-4 py-3 text-slate-900">{entry.class_name ?? '—'}</td>
                                             <td className="px-4 py-3 text-slate-900">{entry.venue_name}</td>
-                                            <td className="px-4 py-3 text-slate-900">
-                                                {formatDay(entry.day)}
-                                            </td>
                                             <td className="px-4 py-3 text-slate-900">{entry.start_time} - {entry.end_time}</td>
                                             <td className="px-4 py-3 text-right">
                                                 <div className="flex gap-2 justify-end">
@@ -1064,9 +1207,19 @@ export default function LectureScheduler({ activeSession: propsSession, activeSe
                     <CardContent className="p-6 space-y-4">
                         {!allCoursesScheduled && !timetablePublished && (
                             <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg">
-                                <p className="text-sm font-medium text-amber-800">Schedule all courses before finalizing</p>
+                                <p className="text-sm font-medium text-amber-800">
+                                    {isPostSiwesSemester
+                                        ? 'You cannot publish until each course has 6 hours scheduled for every class'
+                                        : isSummerSemester
+                                        ? 'You cannot publish until each course has 2 hours scheduled for every class'
+                                        : 'You cannot publish until all courses are scheduled for every class'}
+                                </p>
                                 <p className="text-sm text-amber-700 mt-1">
-                                    {scheduledCount} of {totalCount} courses scheduled. {missingCount} course{missingCount !== 1 ? 's' : ''} still need to be scheduled.
+                                    {isPostSiwesSemester
+                                        ? `${scheduledCount} of ${totalCount} class–course combinations have 6 hours scheduled. ${missingCount} still need 6 hours each.`
+                                        : isSummerSemester
+                                        ? `${scheduledCount} of ${totalCount} class–course combinations have 2 hours scheduled. ${missingCount} still need 2 hours each.`
+                                        : `Clear the course dropdown: every required course must be scheduled for each class group. ${scheduledCount} of ${totalCount} courses scheduled. ${missingCount} course${missingCount !== 1 ? 's' : ''} still need to be scheduled.`}
                                 </p>
                             </div>
                         )}
@@ -1080,11 +1233,30 @@ export default function LectureScheduler({ activeSession: propsSession, activeSe
                             </p>
                         )}
                         {!allCoursesScheduled && !timetablePublished && (
-                            <p className="text-amber-700 text-sm font-medium">You cannot finalize until all courses are scheduled ({scheduledCount} of {totalCount} done).</p>
+                            <p className="text-amber-700 text-sm font-medium">
+                                {isPostSiwesSemester
+                                    ? `You cannot finalize until each course has 6 hours scheduled for every class (${scheduledCount} of ${totalCount} done).`
+                                    : isSummerSemester
+                                    ? `You cannot finalize until each course has 2 hours scheduled for every class (${scheduledCount} of ${totalCount} done).`
+                                    : `You cannot finalize until all courses are cleared from the dropdown (scheduled for every class) (${scheduledCount} of ${totalCount} done).`}
+                            </p>
                         )}
                         <Button
                             type="button"
-                            onClick={() => setShowApproveModal(true)}
+                            onClick={async () => {
+                                if (!timetablePublished && !allCoursesScheduled) return;
+                                const semesterId = activeSemester?.semester_id ?? activeSemester?.id;
+                                if (!semesterId) {
+                                    setShowApproveModal(true);
+                                    return;
+                                }
+                                const check = await (api as any).canPublishSemester(semesterId) as { success?: boolean; data?: { canPublish?: boolean; message?: string } };
+                                if (check?.success && check?.data && !check.data.canPublish) {
+                                    toast.error(check.data.message || 'Schedule all courses for every class before publishing.');
+                                    return;
+                                }
+                                setShowApproveModal(true);
+                            }}
                             disabled={!timetablePublished && !allCoursesScheduled}
                             className="bg-[#0f2044] text-white hover:bg-[#1a3a5c] disabled:opacity-50 disabled:pointer-events-none"
                         >

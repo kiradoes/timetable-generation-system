@@ -58,7 +58,7 @@ export class ApiService {
     getSchedulesByTimetable(timetableId: number): Promise<ApiResponse<any>>;
     checkVenueConflict(sessionId: number, venueId: number, day: string, startTime: string, endTime: string, excludeScheduleId?: number | null): Promise<{ success: boolean; conflict?: boolean; message?: string }>;
     checkClassGroupTimeConflict(sessionId: number, groupId: number, day: string, startTime: string, endTime: string, excludeScheduleId?: number | null, courseId?: number | null): Promise<{ success: boolean; conflict?: boolean; message?: string }>;
-    checkCourseHoursForGroup(sessionId: number, courseId: number, classGroupId: number, durationHours: number, excludeScheduleId?: number | null): Promise<{ success: boolean; overLimit?: boolean; message?: string }>;
+    checkCourseHoursForGroup(sessionId: number, courseId: number, classGroupId: number, durationHours: number, excludeScheduleId?: number | null, semesterId?: number | null): Promise<{ success: boolean; overLimit?: boolean; message?: string }>;
     checkSpecialEventConflict(sessionId: number, day: string, startTime: string, endTime: string, classGroupLevel: number | string | null): Promise<{ success: boolean; conflict?: boolean; message?: string }>;
     createSchedule(data: any): Promise<ApiResponse<any>>;
     updateSchedule(id: number, data: any): Promise<ApiResponse<any>>;

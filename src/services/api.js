@@ -733,17 +733,51 @@ class ApiService {
     return this.handleResponse(data, error);
   }
 
+  _normalizeVenueName(s) {
+    return (s || '').trim().replace(/\s+/g, '').toLowerCase();
+  }
+
   async createVenue(data) {
-    const { data: res, error } = await supabase.from('venues').insert([data]).select().single();
+    const name = (data.name || data.venue_name || '').trim();
+    if (name) {
+      const { data: existing } = await supabase.from('venues').select('venue_id, name').limit(1000);
+      const normalizedNew = this._normalizeVenueName(name);
+      const match = (existing || []).find((v) => this._normalizeVenueName(v.name) === normalizedNew);
+      if (match) return this.handleResponse(null, { message: 'A venue with this name already exists.' });
+    }
+    const toInsert = { ...data };
+    if (toInsert.venue_name != null && toInsert.name == null) toInsert.name = toInsert.venue_name;
+    delete toInsert.venue_name;
+    const { data: res, error } = await supabase.from('venues').insert([toInsert]).select().single();
     return this.handleResponse(res, error);
   }
 
   async updateVenue(id, data) {
-    const { data: res, error } = await supabase.from('venues').update(data).eq('venue_id', id).select().single();
+    const name = (data.name || data.venue_name || '').trim();
+    if (name) {
+      const { data: existing } = await supabase.from('venues').select('venue_id, name').limit(1000);
+      const normalizedNew = this._normalizeVenueName(name);
+      const match = (existing || []).find((v) => Number(v.venue_id) !== Number(id) && this._normalizeVenueName(v.name) === normalizedNew);
+      if (match) return this.handleResponse(null, { message: 'A venue with this name already exists.' });
+    }
+    const toUpdate = { ...data };
+    if (toUpdate.venue_name != null && toUpdate.name == null) toUpdate.name = toUpdate.venue_name;
+    delete toUpdate.venue_name;
+    const { data: res, error } = await supabase.from('venues').update(toUpdate).eq('venue_id', id).select().single();
     return this.handleResponse(res, error);
   }
 
   async deleteVenue(id) {
+    const { count, error: checkErr } = await supabase
+      .from('schedules')
+      .select('schedule_id', { count: 'exact', head: true })
+      .eq('venue_id', id);
+    if (checkErr) return this.handleResponse(null, checkErr);
+    if (count != null && count > 0) {
+      return this.handleResponse(null, {
+        message: `Cannot delete this venue because it is assigned to ${count} schedule(s). Reassign those sessions to another venue or remove the schedules first, then try again.`,
+      });
+    }
     const { data, error } = await supabase.from('venues').delete().eq('venue_id', id);
     return this.handleResponse(data, error);
   }
@@ -976,11 +1010,147 @@ class ApiService {
     return this.handleResponse(res, null);
   }
 
+  /**
+   * TIMETABLE RULES (enforced during scheduling and publish)
+   * 1. Publish: Cannot publish until all required courses are scheduled for every class (per group); see canPublishSemester.
+   * 2. Venue: A venue must not be assigned to more than one class at the same time; checkVenueConflict.
+   * 3. Lecturer: A lecturer must not be scheduled for more than one class at the same time; checkLecturerTimeConflict.
+   * 4. Class: A class must not be scheduled for overlapping lectures; checkClassGroupTimeConflict.
+   * 5. Venue capacity: Venue capacity must be at least the class size; enforced in createSchedule/updateSchedule.
+   * 6. Same course+class must use the same lecturer across all slots; _getRequiredLecturerForCourseGroup.
+   * 7. Predefined constraints (e.g. max 2 slots per course per group per week); checkCourseHoursForGroup.
+   */
+
+  // ========== SEMESTER HOURS (static logic) ==========
+  // How many hours per (course, class group) for each semester type. Used by checkCourseHoursForGroup and canPublishSemester.
+  // - First / Second: not hours-based; max 2 SLOTS per week per (course, group). Publish = every required course scheduled at least once.
+  // - Summer: 2 HOURS total per (course, group). Publish = every required (course, class) has ≥ 2 hours.
+  // - Post-SIWES: 6 HOURS total per (course, group). Publish = every required (course, class) has ≥ 6 hours.
+  // Semester is identified by name: "summer" (or includes "summer"), "post-siwes" (or "post siwes"); everything else = First/Second.
+  static SEMESTER_HOURS = { SUMMER_HOURS: 2, POST_SIWES_HOURS: 6, FIRST_SECOND_SLOTS_PER_WEEK: 2 };
+
+  /**
+   * Check if the timetable for this semester can be published.
+   * - First/Second: every class group must have all required courses scheduled at least once.
+   * - Summer: every required (group, course) must have at least 2 hours scheduled total.
+   * - Post-SIWES: every required (group, course) must have at least 6 hours scheduled total.
+   * Returns { success, canPublish, message, missing }.
+   */
+  async canPublishSemester(semesterId) {
+    const { data: semester } = await supabase.from('semesters').select('session_id, name').eq('semester_id', semesterId).maybeSingle();
+    if (!semester?.session_id) return this.handleResponse(null, { message: 'Semester not found.' });
+    const sessionId = semester.session_id;
+    const semesterName = (semester.name && String(semester.name).trim().toLowerCase()) || '';
+    const isPostSiwes = semesterName.includes('post-siwes') || semesterName === 'post siwes';
+    const isSummer = semesterName === 'summer' || semesterName.includes('summer');
+
+    const { data: groups } = await supabase.from('class_groups').select('group_id, department, level').eq('session_id', sessionId).eq('status', 'active');
+    const { data: courses } = await supabase.from('courses').select('course_id, course_code, title, department, level, category').eq('session_id', sessionId).eq('status', 'active');
+
+    const checkHoursSemester = async (requiredHours) => {
+      const schedRes = await this.getSchedulesWithDetails({ session_id: sessionId });
+      const scheduleRows = (schedRes.success && Array.isArray(schedRes.data)) ? schedRes.data : [];
+      const inThisSemester = scheduleRows.filter((row) => (row.semester_id ?? null) === semesterId);
+      const toMinutes = (t) => {
+        if (!t) return 0;
+        const [h, m] = String(t).slice(0, 5).split(':').map(Number);
+        return (h || 0) * 60 + (m || 0);
+      };
+      const hoursByKey = new Map();
+      for (const row of inThisSemester) {
+        const key = `${row.class_group_id ?? row.group_id}-${row.course_id}`;
+        const start = toMinutes(row.start_time);
+        const end = toMinutes(row.end_time);
+        const mins = end > start ? end - start : 0;
+        hoursByKey.set(key, (hoursByKey.get(key) || 0) + mins);
+      }
+      const missing = [];
+      for (const g of groups || []) {
+        const dept = g.department || '';
+        const lvl = g.level != null ? Number(g.level) : null;
+        for (const c of courses || []) {
+          if (c.category === 'GEDS' || c.category === 'SAT') continue;
+          if ((c.department || '') !== dept) continue;
+          if (lvl != null && c.level != null && Number(c.level) !== lvl) continue;
+          const key = `${g.group_id}-${c.course_id}`;
+          const totalMins = hoursByKey.get(key) || 0;
+          if (totalMins < requiredHours * 60) {
+            missing.push({
+              group: `${g.level}L ${g.department}`,
+              course: c.course_code || c.title || 'Course',
+              hoursScheduled: Math.round(totalMins / 60),
+              required: requiredHours,
+            });
+          }
+        }
+      }
+      return { missing, requiredHours };
+    };
+
+    if (isPostSiwes) {
+      const required = ApiService.SEMESTER_HOURS.POST_SIWES_HOURS;
+      const { missing } = await checkHoursSemester(required);
+      if (missing.length > 0) {
+        const list = missing.slice(0, 10).map((m) => `${m.course} (${m.group}): ${m.hoursScheduled ?? 0}/${m.required} hrs`).join('; ');
+        return this.handleResponse({
+          canPublish: false,
+          message: `Cannot publish Post-SIWES timetable: each course must have ${required} hours scheduled per class. Missing or incomplete: ${list}${missing.length > 10 ? ` and ${missing.length - 10} more.` : '.'}`,
+          missing,
+        }, null);
+      }
+      return this.handleResponse({ canPublish: true, message: `All required courses have ${required} hours scheduled per class.` }, null);
+    }
+
+    if (isSummer) {
+      const required = ApiService.SEMESTER_HOURS.SUMMER_HOURS;
+      const { missing } = await checkHoursSemester(required);
+      if (missing.length > 0) {
+        const list = missing.slice(0, 10).map((m) => `${m.course} (${m.group}): ${m.hoursScheduled ?? 0}/${m.required} hrs`).join('; ');
+        return this.handleResponse({
+          canPublish: false,
+          message: `Cannot publish Summer timetable: each course must have ${required} hours scheduled per class. Missing or incomplete: ${list}${missing.length > 10 ? ` and ${missing.length - 10} more.` : '.'}`,
+          missing,
+        }, null);
+      }
+      return this.handleResponse({ canPublish: true, message: `All required courses have ${required} hours scheduled per class.` }, null);
+    }
+
+    const { data: scheduleRows } = await supabase.from('schedules').select('group_id, course_id').eq('session_id', sessionId);
+    const scheduledSet = new Set((scheduleRows || []).map((r) => `${r.group_id}-${r.course_id}`));
+    const missing = [];
+    for (const g of groups || []) {
+      const dept = g.department || '';
+      const lvl = g.level != null ? Number(g.level) : null;
+      for (const c of courses || []) {
+        if (c.category === 'GEDS' || c.category === 'SAT') continue;
+        if ((c.department || '') !== dept) continue;
+        if (lvl != null && c.level != null && Number(c.level) !== lvl) continue;
+        const key = `${g.group_id}-${c.course_id}`;
+        if (!scheduledSet.has(key)) missing.push({ group: `${g.level}L ${g.department}`, course: c.course_code || c.title || 'Course' });
+      }
+    }
+    if (missing.length > 0) {
+      const list = missing.slice(0, 10).map((m) => `${m.course} (${m.group})`).join('; ');
+      return this.handleResponse({
+        canPublish: false,
+        message: `Cannot publish: the following courses are not yet scheduled for their class: ${list}${missing.length > 10 ? ` and ${missing.length - 10} more.` : '.'} Schedule all courses before publishing.`,
+        missing,
+      }, null);
+    }
+    return this.handleResponse({ canPublish: true, message: 'All required courses are scheduled.' }, null);
+  }
+
   async updateSemester(id, data) {
     if (data.status === 'active') {
       const { data: current } = await supabase.from('semesters').select('session_id').eq('semester_id', id).maybeSingle();
       if (current?.session_id) {
         await supabase.from('semesters').update({ status: 'inactive' }).eq('session_id', current.session_id).neq('semester_id', id);
+      }
+    }
+    if (data.timetable_status === 'published') {
+      const check = await this.canPublishSemester(id);
+      if (check.success && check.data && !check.data.canPublish) {
+        return this.handleResponse(null, { message: check.data.message || 'Schedule all courses before publishing.' });
       }
     }
     const { data: res, error } = await supabase.from('semesters').update(data).eq('semester_id', id).select().single();
@@ -1123,7 +1293,7 @@ class ApiService {
    * (so department officers do not see schedules created by the school officer; conflict checks still use all schedules).
    */
   async getSchedulesWithDetails(params = {}) {
-    const scheduleColumns = ['schedule_id', 'course_id', 'lecturer_id', 'venue_id', 'slot_id', 'session_id', 'group_id', 'status'];
+    const scheduleColumns = ['schedule_id', 'course_id', 'lecturer_id', 'venue_id', 'slot_id', 'session_id', 'group_id', 'status', 'semester_id'];
     const department = params.department;
     const forDepartmentView = params.for_department_view === true;
     const rest = { ...params };
@@ -1145,6 +1315,7 @@ class ApiService {
         session_id,
         group_id,
         status,
+        semester_id,
         created_by_role,
         time_slots(day_of_week, start_time, end_time),
         courses(course_code, title, category),
@@ -1191,6 +1362,7 @@ class ApiService {
         venue_name: venue.name || '—',
         session_id: row.session_id,
         status: row.status,
+        semester_id: row.semester_id ?? null,
       };
     });
     return this.handleResponse(mapped, null);
@@ -1201,10 +1373,36 @@ class ApiService {
     return this.handleResponse(data, error);
   }
 
-  /** Check if a venue is already in use for the same session, day, and overlapping time (by any department). Returns { success, conflict, message }. */
-  async checkVenueConflict(sessionId, venueId, day, startTime, endTime, excludeScheduleId = null) {
+  /** Get semester IDs that run concurrently with the given semester (share the same venue pool). Summer and Post-SIWES run together; First/Second are alone. Returns array of semester_id or null if no filter. */
+  async _getConcurrentSemesterIds(sessionId, semesterId) {
+    if (semesterId == null) return null;
+    const { data: semester } = await supabase.from('semesters').select('semester_id, name').eq('semester_id', semesterId).maybeSingle();
+    if (!semester) return [semesterId];
+    const name = (semester.name || '').trim().toLowerCase();
+    const isSummer = name === 'summer' || name.includes('summer');
+    const isPostSiwes = name.includes('post-siwes') || name === 'post siwes';
+    if (isSummer || isPostSiwes) {
+      const { data: list } = await supabase.from('semesters').select('semester_id, name').eq('session_id', sessionId);
+      const ids = (list || []).filter((s) => {
+        const n = (s.name || '').trim().toLowerCase();
+        return n === 'summer' || n.includes('summer') || n.includes('post-siwes') || n === 'post siwes';
+      }).map((s) => s.semester_id).filter(Boolean);
+      return ids.length ? ids : [semesterId];
+    }
+    return [semesterId];
+  }
+
+  /** Check if a venue is already in use for the same session, day, and overlapping time. When semesterId is set, only schedules in that semester or concurrent semesters (Summer+Post-SIWES) block; ended semesters' venues are open. Returns { success, conflict, message }. */
+  async checkVenueConflict(sessionId, venueId, day, startTime, endTime, excludeScheduleId = null, semesterId = null) {
     const res = await this.getSchedulesWithDetails({ session_id: sessionId });
     if (!res.success || !Array.isArray(res.data)) return { success: true, conflict: false };
+    let rows = res.data;
+    if (semesterId != null) {
+      const concurrentIds = await this._getConcurrentSemesterIds(sessionId, semesterId);
+      if (Array.isArray(concurrentIds) && concurrentIds.length > 0) {
+        rows = rows.filter((row) => row.semester_id == null || concurrentIds.includes(row.semester_id));
+      }
+    }
     const start = String(startTime).slice(0, 5);
     const end = String(endTime).slice(0, 5);
     const toMinutes = (t) => {
@@ -1213,7 +1411,7 @@ class ApiService {
     };
     const s1 = toMinutes(start);
     const e1 = toMinutes(end);
-    for (const row of res.data) {
+    for (const row of rows) {
       if (row.venue_id !== venueId) continue;
       if (row.day_of_week !== day && row.day !== day) continue;
       if (excludeScheduleId != null && (row.schedule_id === excludeScheduleId || row.id === excludeScheduleId)) continue;
@@ -1225,7 +1423,7 @@ class ApiService {
         return {
           success: true,
           conflict: true,
-          message: `This venue is already in use for that time by ${dept} (${course}) at ${row.day_of_week || row.day} ${row.start_time}–${row.end_time}. Please choose another venue or time.`,
+          message: `This venue is already in use by another class (${dept}: ${course}) at ${row.day_of_week || row.day} ${row.start_time}–${row.end_time}. A venue cannot be assigned to more than one class at the same time. Please choose another venue or time.`,
         };
       }
     }
@@ -1306,16 +1504,131 @@ class ApiService {
   }
 
   /**
-   * Check if (course, class group) already has 2 schedule slots for the week. Each course can only be scheduled twice per week for a particular group.
+   * Check if a lecturer is already scheduled at the same day and overlapping time (any session/department).
+   * Rule: A lecturer must not be scheduled for more than one class at the same time.
+   * Returns { success, conflict, message }.
+   */
+  async checkLecturerTimeConflict(sessionId, lecturerId, day, startTime, endTime, excludeScheduleId = null) {
+    const res = await this.getSchedulesWithDetails({ session_id: sessionId });
+    if (!res.success || !Array.isArray(res.data)) return { success: true, conflict: false };
+    const start = String(startTime).slice(0, 5);
+    const end = String(endTime).slice(0, 5);
+    const toMinutes = (t) => {
+      const [h, m] = String(t).slice(0, 5).split(':').map(Number);
+      return (h || 0) * 60 + (m || 0);
+    };
+    const s1 = toMinutes(start);
+    const e1 = toMinutes(end);
+    for (const row of res.data) {
+      if (row.lecturer_id !== lecturerId) continue;
+      if (row.day_of_week !== day && row.day !== day) continue;
+      if (excludeScheduleId != null && (row.schedule_id === excludeScheduleId || row.id === excludeScheduleId)) continue;
+      const s2 = toMinutes(row.start_time);
+      const e2 = toMinutes(row.end_time);
+      if (s1 < e2 && e1 > s2) {
+        const course = row.course_code || row.course_name || 'a course';
+        return {
+          success: true,
+          conflict: true,
+          message: `This lecturer is already scheduled at that time for ${course} (${row.day_of_week || row.day} ${row.start_time}–${row.end_time}). A lecturer cannot be in two places at once. Choose another time or lecturer.`,
+        };
+      }
+    }
+    return { success: true, conflict: false };
+  }
+
+  /**
+   * Check if (course, class group) is at limit for the week.
+   * - First/Second semester: max 2 slots per week per group.
+   * - Summer semester: max 2 hours total per (course, group).
+   * - Post-SIWES semester: max 6 hours total per (course, group).
+   * When semesterId is provided, only schedules in that semester are counted.
    * Returns { success: true, overLimit: true, message } when at limit; otherwise { success: true, overLimit: false }.
    */
-  async checkCourseHoursForGroup(sessionId, courseId, classGroupId, _durationHours, excludeScheduleId = null) {
-    const maxSlotsPerWeek = 2;
+  async checkCourseHoursForGroup(sessionId, courseId, classGroupId, durationHours, excludeScheduleId = null, semesterId = null) {
+    let isPostSiwes = false;
+    let isSummer = false;
+    if (semesterId != null) {
+      const { data: sem } = await supabase.from('semesters').select('name').eq('semester_id', semesterId).maybeSingle();
+      const name = (sem && sem.name) ? String(sem.name).trim().toLowerCase() : '';
+      isPostSiwes = name.includes('post-siwes') || name === 'post siwes';
+      isSummer = name === 'summer' || name.includes('summer');
+    }
 
     const res = await this.getSchedulesWithDetails({ session_id: sessionId, course_id: courseId, group_id: classGroupId });
     if (!res.success || !Array.isArray(res.data)) return { success: true, overLimit: false };
+
+    // When checking by semester, only count schedules in that semester
+    let rows = res.data;
+    if (semesterId != null) {
+      rows = rows.filter((row) => (row.semester_id ?? null) === semesterId);
+    }
+
+    const toMinutes = (t) => {
+      if (!t) return 0;
+      const [h, m] = String(t).slice(0, 5).split(':').map(Number);
+      return (h || 0) * 60 + (m || 0);
+    };
+
+    const { POST_SIWES_HOURS, SUMMER_HOURS, FIRST_SECOND_SLOTS_PER_WEEK } = ApiService.SEMESTER_HOURS;
+
+    if (isPostSiwes) {
+      let totalMinutes = 0;
+      for (const row of rows) {
+        if (excludeScheduleId != null && (row.schedule_id === excludeScheduleId || row.id === excludeScheduleId)) continue;
+        const start = toMinutes(row.start_time);
+        const end = toMinutes(row.end_time);
+        if (end > start) totalMinutes += end - start;
+      }
+      const durationMins = (typeof durationHours === 'number' ? durationHours * 60 : 0) || 0;
+      const maxMinutes = POST_SIWES_HOURS * 60;
+      if (totalMinutes >= maxMinutes) {
+        return {
+          success: true,
+          overLimit: true,
+          message: `This course has already reached the ${POST_SIWES_HOURS}-hour total for this class in Post-SIWES semester. It cannot be scheduled again for this group.`,
+        };
+      }
+      if (totalMinutes + durationMins > maxMinutes) {
+        return {
+          success: true,
+          overLimit: true,
+          message: `This course would exceed ${POST_SIWES_HOURS} hours total for this class (Post-SIWES). Currently ${Math.round(totalMinutes / 60)} hour(s) scheduled; ${POST_SIWES_HOURS} hours maximum.`,
+        };
+      }
+      return { success: true, overLimit: false };
+    }
+
+    if (isSummer) {
+      let totalMinutes = 0;
+      for (const row of rows) {
+        if (excludeScheduleId != null && (row.schedule_id === excludeScheduleId || row.id === excludeScheduleId)) continue;
+        const start = toMinutes(row.start_time);
+        const end = toMinutes(row.end_time);
+        if (end > start) totalMinutes += end - start;
+      }
+      const durationMins = (typeof durationHours === 'number' ? durationHours * 60 : 0) || 0;
+      const maxMinutes = SUMMER_HOURS * 60;
+      if (totalMinutes >= maxMinutes) {
+        return {
+          success: true,
+          overLimit: true,
+          message: `This course has already reached the ${SUMMER_HOURS}-hour total for this class in Summer semester. It cannot be scheduled again for this group.`,
+        };
+      }
+      if (totalMinutes + durationMins > maxMinutes) {
+        return {
+          success: true,
+          overLimit: true,
+          message: `This course would exceed ${SUMMER_HOURS} hours total for this class (Summer). Currently ${Math.round(totalMinutes / 60)} hour(s) scheduled; ${SUMMER_HOURS} hours maximum.`,
+        };
+      }
+      return { success: true, overLimit: false };
+    }
+
+    const maxSlotsPerWeek = FIRST_SECOND_SLOTS_PER_WEEK;
     let count = 0;
-    for (const row of res.data) {
+    for (const row of rows) {
       if (excludeScheduleId != null && (row.schedule_id === excludeScheduleId || row.id === excludeScheduleId)) continue;
       count++;
     }
@@ -1346,6 +1659,7 @@ class ApiService {
   }
 
   async createSchedule(data) {
+    // Enforces: same lecturer for same course+class; no venue double-book; no class overlap; no lecturer double-book; venue capacity >= class size
     const hasSlot = data.slot_id != null;
     const hasDayTime = data.session_id != null && data.day && data.start_time && (data.end_time != null || data.duration_hours != null);
     const groupId = data.group_id ?? data.class_group_id ?? null;
@@ -1356,6 +1670,28 @@ class ApiService {
       }
     }
     if (hasSlot) {
+      const { data: slotRow } = await supabase.from('time_slots').select('day_of_week, start_time, end_time').eq('slot_id', data.slot_id).maybeSingle();
+      if (!slotRow) return this.handleResponse(null, { message: 'Invalid slot_id. Time slot not found.' });
+      const day = slotRow.day_of_week;
+      const startStr = String(slotRow.start_time).slice(0, 5);
+      const endStr = String(slotRow.end_time).slice(0, 5);
+      const slotSemesterId = data.semester_id ?? null;
+      const venueCheck = await this.checkVenueConflict(data.session_id, data.venue_id, day, startStr, endStr, null, slotSemesterId);
+      if (venueCheck.conflict) return this.handleResponse(null, { message: venueCheck.message });
+      const classCheck = await this.checkClassGroupTimeConflict(data.session_id, groupId, day, startStr, endStr, null, data.course_id);
+      if (classCheck.conflict) return this.handleResponse(null, { message: classCheck.message });
+      const lecturerCheck = await this.checkLecturerTimeConflict(data.session_id, data.lecturer_id, day, startStr, endStr, null);
+      if (lecturerCheck.conflict) return this.handleResponse(null, { message: lecturerCheck.message });
+      let classSize = 0;
+      if (data.class_group_id) {
+        const { data: grp } = await supabase.from('class_groups').select('student_count').eq('group_id', data.class_group_id).maybeSingle();
+        if (grp?.student_count != null) classSize = grp.student_count;
+      }
+      const { data: venueRow } = await supabase.from('venues').select('capacity').eq('venue_id', data.venue_id).maybeSingle();
+      const venueCapacity = venueRow?.capacity != null ? Number(venueRow.capacity) : 0;
+      if (classSize > 0 && venueCapacity > 0 && classSize > venueCapacity) {
+        return this.handleResponse(null, { message: `Venue capacity (${venueCapacity}) is less than class size (${classSize}). Choose a larger venue.` });
+      }
       const insertData = { ...data };
       if (insertData.class_group_id != null && insertData.group_id == null) insertData.group_id = insertData.class_group_id;
       if (insertData.created_by_role != null) { /* pass through */ } else delete insertData.created_by_role;
@@ -1370,15 +1706,27 @@ class ApiService {
         ? this._hoursBetween(data.start_time, data.end_time)
         : 1);
       const endStr = data.end_time ? String(data.end_time).slice(0, 5) : this._endTimeFromStartAndDuration(startStr, durationHours);
-      const hoursCheck = await this.checkCourseHoursForGroup(data.session_id, data.course_id, data.class_group_id, durationHours, null);
+      const semesterId = data.semester_id ?? null;
+      const hoursCheck = await this.checkCourseHoursForGroup(data.session_id, data.course_id, data.class_group_id, durationHours, null, semesterId);
       if (hoursCheck.overLimit) return this.handleResponse(null, { message: hoursCheck.message });
-      const slotId = await this._getOrCreateTimeSlot(data.day, startStr, endStr);
-      if (!slotId) return this.handleResponse(null, { message: 'Could not get or create time slot. Run the SQL in supabase/run_get_or_create_time_slot.sql in Supabase Dashboard → SQL Editor (see supabase/README_MIGRATIONS.md).' });
+      const venueCheck = await this.checkVenueConflict(data.session_id, data.venue_id, data.day, startStr, endStr, null, semesterId);
+      if (venueCheck.conflict) return this.handleResponse(null, { message: venueCheck.message });
+      const classCheck = await this.checkClassGroupTimeConflict(data.session_id, data.class_group_id, data.day, startStr, endStr, null, data.course_id);
+      if (classCheck.conflict) return this.handleResponse(null, { message: classCheck.message });
+      const lecturerCheck = await this.checkLecturerTimeConflict(data.session_id, data.lecturer_id, data.day, startStr, endStr, null);
+      if (lecturerCheck.conflict) return this.handleResponse(null, { message: lecturerCheck.message });
       let classSize = 0;
       if (data.class_group_id) {
         const { data: grp } = await supabase.from('class_groups').select('student_count').eq('group_id', data.class_group_id).maybeSingle();
         if (grp?.student_count != null) classSize = grp.student_count;
       }
+      const { data: venueRow } = await supabase.from('venues').select('capacity').eq('venue_id', data.venue_id).maybeSingle();
+      const venueCapacity = venueRow?.capacity != null ? Number(venueRow.capacity) : 0;
+      if (classSize > 0 && venueCapacity > 0 && classSize > venueCapacity) {
+        return this.handleResponse(null, { message: `Venue capacity (${venueCapacity}) is less than class size (${classSize}). Choose a larger venue.` });
+      }
+      const slotId = await this._getOrCreateTimeSlot(data.day, startStr, endStr);
+      if (!slotId) return this.handleResponse(null, { message: 'Could not get or create time slot. Run the SQL in supabase/run_get_or_create_time_slot.sql in Supabase Dashboard → SQL Editor (see supabase/README_MIGRATIONS.md).' });
       const insertPayload = {
         session_id: data.session_id,
         course_id: data.course_id,
@@ -1391,6 +1739,7 @@ class ApiService {
         class_size: classSize,
         status: 'scheduled',
       };
+      if (semesterId != null) insertPayload.semester_id = semesterId;
       if (data.created_by_role != null) insertPayload.created_by_role = data.created_by_role;
       const { data: res, error } = await supabase.from('schedules').insert([insertPayload]).select().single();
       if (error) return this.handleResponse(null, error);
@@ -1445,6 +1794,7 @@ class ApiService {
     const courseId = payload.course_id ?? existing?.course_id;
     const groupId = payload.group_id ?? payload.class_group_id ?? existing?.group_id;
     const effectiveLecturer = payload.lecturer_id ?? existing?.lecturer_id;
+    const effectiveVenue = payload.venue_id ?? existing?.venue_id;
     if (sessionId != null && courseId != null && groupId != null && effectiveLecturer != null) {
       const requiredLecturer = await this._getRequiredLecturerForCourseGroup(sessionId, courseId, groupId, id);
       if (requiredLecturer != null && Number(effectiveLecturer) !== Number(requiredLecturer)) {
@@ -1452,9 +1802,49 @@ class ApiService {
       }
     }
     const durationHours = payload.duration_hours ?? (payload.start_time && payload.end_time ? this._hoursBetween(payload.start_time, payload.end_time) : null);
+    let semesterIdForHours = payload.semester_id ?? null;
+    if (sessionId != null && semesterIdForHours == null) {
+      const { data: semList } = await supabase.from('semesters').select('semester_id').eq('session_id', sessionId).eq('status', 'active').limit(1);
+      if (semList && semList[0]) semesterIdForHours = semList[0].semester_id;
+    }
     if (sessionId != null && courseId != null && groupId != null && durationHours != null) {
-      const hoursCheck = await this.checkCourseHoursForGroup(sessionId, courseId, groupId, durationHours, id);
+      const hoursCheck = await this.checkCourseHoursForGroup(sessionId, courseId, groupId, durationHours, id, semesterIdForHours);
       if (hoursCheck.overLimit) return this.handleResponse(null, { message: hoursCheck.message });
+    }
+    let day = payload.day;
+    let startStr = payload.start_time ? String(payload.start_time).slice(0, 5) : null;
+    let endStr = payload.end_time ? String(payload.end_time).slice(0, 5) : null;
+    if ((day && startStr && endStr) || existing?.slot_id) {
+      if (day && startStr && endStr) {
+        const venueCheck = await this.checkVenueConflict(sessionId, effectiveVenue, day, startStr, endStr, id, semesterIdForHours);
+        if (venueCheck.conflict) return this.handleResponse(null, { message: venueCheck.message });
+        const classCheck = await this.checkClassGroupTimeConflict(sessionId, groupId, day, startStr, endStr, id, courseId);
+        if (classCheck.conflict) return this.handleResponse(null, { message: classCheck.message });
+        const lecturerCheck = await this.checkLecturerTimeConflict(sessionId, effectiveLecturer, day, startStr, endStr, id);
+        if (lecturerCheck.conflict) return this.handleResponse(null, { message: lecturerCheck.message });
+      } else if (existing.slot_id) {
+        const { data: slotRow } = await supabase.from('time_slots').select('day_of_week, start_time, end_time').eq('slot_id', existing.slot_id).maybeSingle();
+        if (slotRow) {
+          day = slotRow.day_of_week;
+          startStr = String(slotRow.start_time).slice(0, 5);
+          endStr = String(slotRow.end_time).slice(0, 5);
+          const venueCheck = await this.checkVenueConflict(sessionId, effectiveVenue, day, startStr, endStr, id, semesterIdForHours);
+          if (venueCheck.conflict) return this.handleResponse(null, { message: venueCheck.message });
+          const classCheck = await this.checkClassGroupTimeConflict(sessionId, groupId, day, startStr, endStr, id, courseId);
+          if (classCheck.conflict) return this.handleResponse(null, { message: classCheck.message });
+          const lecturerCheck = await this.checkLecturerTimeConflict(sessionId, effectiveLecturer, day, startStr, endStr, id);
+          if (lecturerCheck.conflict) return this.handleResponse(null, { message: lecturerCheck.message });
+        }
+      }
+      if (groupId && effectiveVenue) {
+        const { data: grp } = await supabase.from('class_groups').select('student_count').eq('group_id', groupId).maybeSingle();
+        const { data: venueRow } = await supabase.from('venues').select('capacity').eq('venue_id', effectiveVenue).maybeSingle();
+        const classSize = grp?.student_count != null ? Number(grp.student_count) : 0;
+        const venueCapacity = venueRow?.capacity != null ? Number(venueRow.capacity) : 0;
+        if (classSize > 0 && venueCapacity > 0 && classSize > venueCapacity) {
+          return this.handleResponse(null, { message: `Venue capacity (${venueCapacity}) is less than class size (${classSize}). Choose a larger venue.` });
+        }
+      }
     }
     if (payload.slot_id == null && payload.day && payload.start_time && payload.end_time) {
       const slot = await this._getOrCreateTimeSlot(payload.day, payload.start_time, payload.end_time);

@@ -1,4 +1,4 @@
-import { Edit2, Plus, Trash2 } from 'lucide-react';
+import { Edit2, Plus, Search, Trash2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import api from '../services/api';
@@ -14,6 +14,7 @@ interface DepartmentVenuesManagementProps {
 
 export function DepartmentVenuesManagement({ departmentName, sessionId }: DepartmentVenuesManagementProps) {
     const [venues, setVenues] = useState<any[]>([]);
+    const [venueSearch, setVenueSearch] = useState('');
     const [loading, setLoading] = useState(false);
     const [showForm, setShowForm] = useState(false);
     const [editingId, setEditingId] = useState<number | null>(null);
@@ -90,19 +91,32 @@ export function DepartmentVenuesManagement({ departmentName, sessionId }: Depart
     const handleDelete = async (id: number) => {
         if (confirm('Delete this venue?')) {
             try {
-                await api.deleteVenue(id);
-                toast.success('Venue deleted');
-                fetchVenues();
+                const res = await api.deleteVenue(id) as { success?: boolean; error?: string };
+                if (res?.success) {
+                    toast.success('Venue deleted');
+                    fetchVenues();
+                } else {
+                    toast.error(res?.error || 'Failed to delete venue');
+                }
             } catch (error: any) {
-                toast.error(error.message);
+                toast.error(error?.message || 'Failed to delete venue');
             }
         }
     };
 
     return (
         <div className="space-y-6">
-            <div className="flex justify-between items-center">
+            <div className="flex flex-wrap items-center justify-between gap-4">
                 <h2 className="text-2xl font-bold">{departmentName} - Venues</h2>
+                <div className="relative flex-1 min-w-[200px] max-w-sm">
+                    <Search className="absolute right-3 top-1/2 -translate-y-1/2 size-4 text-slate-400 pointer-events-none" />
+                    <Input
+                        placeholder="Search venue by name..."
+                        value={venueSearch}
+                        onChange={(e) => setVenueSearch(e.target.value)}
+                        className="pr-14"
+                    />
+                </div>
                 <Button onClick={() => { setShowForm(!showForm); setEditingId(null); }}>
                     <Plus className="h-4 w-4 mr-2" />
                     {showForm ? 'Cancel' : 'Add Venue'}
@@ -210,8 +224,18 @@ export function DepartmentVenuesManagement({ departmentName, sessionId }: Depart
                             <tr>
                                 <td colSpan={6} className="text-center py-4 text-gray-500">No venues found</td>
                             </tr>
-                        ) : (
-                            venues.map(venue => (
+                        ) : (() => {
+                            const q = (venueSearch || '').trim().replace(/\s+/g, '').toLowerCase();
+                            const filtered = q ? venues.filter((v: any) => {
+                                const text = (v.venue_name || v.name || '').replace(/\s+/g, '').toLowerCase();
+                                return text.includes(q);
+                            }) : venues;
+                            return filtered.length === 0 ? (
+                                <tr>
+                                    <td colSpan={6} className="text-center py-4 text-gray-500">No venues found matching your search</td>
+                                </tr>
+                            ) : (
+                            filtered.map((venue: any) => (
                                 <tr key={venue.venue_id} className="border-b hover:bg-gray-50">
                                     <td className="py-3 px-4 font-semibold">{venue.venue_name}</td>
                                     <td className="py-3 px-4 text-sm">{venue.venue_type}</td>
@@ -231,8 +255,8 @@ export function DepartmentVenuesManagement({ departmentName, sessionId }: Depart
                                         </Button>
                                     </td>
                                 </tr>
-                            ))
-                        )}
+                            )));
+                        })()}
                     </tbody>
                 </table>
             </div>

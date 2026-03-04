@@ -91,7 +91,7 @@ export function CourseManagementTable() {
                   placeholder="Search by course code, title, or category..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-10 border-slate-300 focus:border-[#ffb71b] focus:ring-[#ffb71b]"
+                  className="pl-14 border-slate-300 focus:border-[#ffb71b] focus:ring-[#ffb71b]"
                 />
               </div>
               <Badge variant="outline" className="bg-slate-100 px-4 py-2">
