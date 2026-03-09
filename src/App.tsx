@@ -8,9 +8,8 @@ import { Toaster } from './components/ui/sonner';
 import { supabase } from './lib/supabase';
 
 export default function App() {
-  const [currentView, setCurrentView] = useState(() => {
-    return localStorage.getItem('currentView') || 'student';
-  });
+  // Always open on the landing page when users open the link (do not restore officer-dashboard from storage)
+  const [currentView, setCurrentView] = useState<'student' | 'officer-login' | 'officer-dashboard'>(() => 'student');
   const [userEmail, setUserEmail] = useState<string | null>(() => {
     return localStorage.getItem('userEmail') || null;
   });
