@@ -119,7 +119,7 @@ export function SchoolComputingCoursesManagement({ sessionId }: SchoolComputingC
         setShowForm(true);
     };
 
-    const semesterLabel = (s: string | undefined) => (s === 'First' || s === 'first' ? 'First' : s === 'Second' || s === 'second' ? 'Second' : s ?? '—');
+    const semesterLabel = (s: string | undefined) => (s === 'First' || s === 'first' ? 'First' : s === 'Second' || s === 'second' ? 'Second' : s === 'Summer' || s === 'summer' ? 'Summer' : s?.toLowerCase().includes('post-siwes') ? 'Post-SIWES' : s ?? '—');
 
     const q = searchQuery.trim().toLowerCase();
     const filteredCourses = q
@@ -213,9 +213,10 @@ export function SchoolComputingCoursesManagement({ sessionId }: SchoolComputingC
                                 <div className="space-y-2">
                                     <Label>Semester *</Label>
                                     <select value={formData.semester} onChange={(e) => setFormData({ ...formData, semester: e.target.value })} className="w-full px-3 py-2 border border-slate-300 rounded-md h-9 focus:outline-none focus:ring-2 focus:ring-[#ffb71b]">
-                                        <option>First</option>
-                                        <option>Second</option>
-                                        <option>Both</option>
+                                        <option value="First">First</option>
+                                        <option value="Second">Second</option>
+                                        <option value="Summer">Summer</option>
+                                        <option value="Post-SIWES">Post-SIWES</option>
                                     </select>
                                 </div>
                                 <div className="space-y-2">

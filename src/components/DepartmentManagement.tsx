@@ -27,7 +27,7 @@ export function DepartmentManagement() {
   const fetchDepartments = async () => {
     try {
       setIsLoading(true);
-      const response = await api.getDepartments();
+      const response = await api.getDepartments({ includeInactive: true });
       console.log('Fetched departments:', response.data);
       setDepartments(response.data || []);
     } catch (error) {

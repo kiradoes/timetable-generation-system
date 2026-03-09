@@ -470,8 +470,14 @@ class ApiService {
 
   async getDepartments(params = {}) {
     let q = supabase.from('departments').select('*');
+    // By default return only active departments so dropdowns exclude deactivated ones
+    const includeInactive = params.includeInactive === true || params.all === true;
+    if (!includeInactive && params.status === undefined) {
+      q = q.eq('status', 'active');
+    }
     for (const [k, v] of Object.entries(params || {})) {
-      if (k === 'limit' || k === 'page') continue;
+      if (k === 'limit' || k === 'page' || k === 'includeInactive' || k === 'all') continue;
+      if (k === 'status' && includeInactive) continue;
       q = q.eq(k, v);
     }
     if (params.limit && params.page) {

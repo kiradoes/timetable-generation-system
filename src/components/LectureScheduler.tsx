@@ -116,7 +116,9 @@ export default function LectureScheduler({ activeSession: propsSession, activeSe
     // Data state (current session only; no session selector in form)
     const [internalSession, setInternalSession] = useState<any>(null);
     const activeSession = propsSession ?? internalSession;
-    const activeSemester = propsSemester ?? null;
+    const [semestersList, setSemestersList] = useState<any[]>([]);
+    const [selectedSemester, setSelectedSemester] = useState<any>(null);
+    const activeSemester = selectedSemester ?? propsSemester ?? null;
     const [departments, setDepartments] = useState<{ department_id?: number; name: string }[]>([]);
     const [lecturers, setLecturers] = useState<Lecturer[]>([]);
     const [courses, setCourses] = useState<Course[]>([]);
@@ -167,6 +169,35 @@ export default function LectureScheduler({ activeSession: propsSession, activeSe
         loadDepts();
     }, []);
 
+    // Fetch all semesters for the session so user can select First, Second, Summer, or Post-SIWES (6-hour logic)
+    useEffect(() => {
+        const sessionId = activeSession?.session_id ?? activeSession?.id;
+        if (!sessionId) {
+            setSemestersList([]);
+            setSelectedSemester(null);
+            return;
+        }
+        const loadSemesters = async () => {
+            try {
+                const res = await api.getSemestersBySession(sessionId) as any;
+                const list = Array.isArray(res?.data) ? res.data : [];
+                setSemestersList(list);
+                if (list.length > 0) {
+                    const active = list.find((s: any) => s.status === 'active');
+                    const matchProp = propsSemester && list.find((s: any) => (s.semester_id ?? s.id) === (propsSemester.semester_id ?? propsSemester.id));
+                    setSelectedSemester(matchProp ?? active ?? list[0]);
+                } else {
+                    setSelectedSemester(null);
+                }
+            } catch (e) {
+                console.error('Failed to fetch semesters:', e);
+                setSemestersList([]);
+                setSelectedSemester(null);
+            }
+        };
+        loadSemesters();
+    }, [activeSession?.session_id ?? activeSession?.id, propsSemester?.semester_id ?? propsSemester?.id]);
+
     // When active session or department changes, fetch session- and department-scoped data (order: department → lecturers, courses, class groups from that department)
     useEffect(() => {
         const sessionId = activeSession?.session_id ?? activeSession?.id;
@@ -186,7 +217,26 @@ export default function LectureScheduler({ activeSession: propsSession, activeSe
                 const norm = (list: any[], idKey: string) => (Array.isArray(list) ? list.map((x) => ({ ...x, id: x[idKey] ?? x.id })) : []);
                 if (coursesRes.success) setCourses(norm(coursesRes.data || [], 'course_id'));
                 if (allCoursesRes.success) setAllCoursesForSession(norm(allCoursesRes.data || [], 'course_id'));
-                if (lecturersRes.success) setLecturers(norm(lecturersRes.data || [], 'lecturer_id'));
+                // Prefer lecturers for this session + department; if none found (e.g. lecturers stored without session or under old department name),
+                // fall back to department-only, then all lecturers, and filter to active ones so the Schedule Lecture lecturer dropdown is populated.
+                if (lecturersRes.success) {
+                    const normLecturers = (raw: any) => norm(raw || [], 'lecturer_id');
+                    let lecList: any[] = normLecturers(lecturersRes.data);
+                    if ((!lecList || lecList.length === 0) && department) {
+                        const fallbackByDept = await api.getLecturers({ department }) as any;
+                        if (fallbackByDept?.success) lecList = normLecturers(fallbackByDept.data);
+                    }
+                    if (!lecList || lecList.length === 0) {
+                        const fallbackAll = await api.getLecturers({}) as any;
+                        if (fallbackAll?.success) lecList = normLecturers(fallbackAll.data);
+                    }
+                    if (lecList && lecList.length > 0) {
+                        const activeLecturers = lecList.filter((l: any) => (l.status ?? 'active') === 'active');
+                        setLecturers(activeLecturers);
+                    } else {
+                        setLecturers([]);
+                    }
+                }
                 if (classGroupsRes.success) setClassGroups(norm(classGroupsRes.data || [], 'group_id'));
                 if (venuesRes.success) setVenues(norm(venuesRes.data || [], 'venue_id'));
             } catch (error) {
@@ -697,7 +747,7 @@ export default function LectureScheduler({ activeSession: propsSession, activeSe
 
     // Finalize: First/Second = each (course, class) has scheduled hours >= course credit_units; Summer = 2 hrs; Post-SIWES = 6 hrs
     const requiredHoursForSemester = isPostSiwesSemester ? 6 : isSummerSemester ? 2 : null;
-    const { allCoursesScheduled, scheduledCount, totalCount, missingCount } = useMemo(() => {
+    const { scheduledCount, totalCount, missingCount } = useMemo(() => {
         // Summer / Post-SIWES: fixed hours per (course, class)
         if (requiredHoursForSemester != null) {
             const requiredPairs = new Set<string>();
@@ -754,6 +804,57 @@ export default function LectureScheduler({ activeSession: propsSession, activeSe
         };
     }, [allCoursesForSession, timetableEntries, requiredHoursForSemester, classGroups, scheduledHoursByCourseGroup]);
 
+    // Complete (department, level, group): group has no pending course – all required courses for that group are fully scheduled
+    const completeGroupsList = useMemo(() => {
+        const list: { department: string; level: string; groupName: string; groupId: number }[] = [];
+        const requiredHoursForCourse = (c: any) => {
+            if (requiredHoursForSemester != null) return requiredHoursForSemester;
+            return (c?.credit_units != null ? Number(c.credit_units) : 2);
+        };
+        for (const g of classGroups) {
+            const gDept = (g.department_name ?? g.department ?? '').trim();
+            const gLevel = g.level != null ? String(g.level) : '';
+            const requiredCourses = allCoursesForSession.filter((c: any) => {
+                if ((c as any).category === 'GEDS' || (c as any).category === 'SAT') return false;
+                const cDept = ((c as any).department ?? '').trim();
+                if (cDept !== gDept) return false;
+                if (gLevel && (c as any).level != null && String((c as any).level) !== gLevel) return false;
+                return true;
+            });
+            if (requiredCourses.length === 0) continue;
+            let allComplete = true;
+            for (const c of requiredCourses) {
+                const key = `${Number(c.id)}-${Number(g.id)}`;
+                const hours = scheduledHoursByCourseGroup.get(key) || 0;
+                const required = requiredHoursForCourse(c);
+                if (hours < required) {
+                    allComplete = false;
+                    break;
+                }
+            }
+            if (allComplete) list.push({ department: gDept, level: gLevel, groupName: g.name ?? '', groupId: g.id });
+        }
+        return list;
+    }, [classGroups, allCoursesForSession, scheduledHoursByCourseGroup, requiredHoursForSemester]);
+
+    const completeDepartments = useMemo(() => [...new Set(completeGroupsList.map((x) => x.department))].filter(Boolean).sort(), [completeGroupsList]);
+    const [publishDepartment, setPublishDepartment] = useState('');
+    const [publishLevel, setPublishLevel] = useState('');
+    const [publishGroupId, setPublishGroupId] = useState<number | ''>('');
+    const publishLevelOptions = useMemo(
+        () => [...new Set(completeGroupsList.filter((x) => x.department === publishDepartment).map((x) => x.level))].sort((a, b) => Number(a) - Number(b)),
+        [completeGroupsList, publishDepartment]
+    );
+    const publishGroupOptions = useMemo(
+        () => completeGroupsList.filter((x) => x.department === publishDepartment && String(x.level) === String(publishLevel)),
+        [completeGroupsList, publishDepartment, publishLevel]
+    );
+    useEffect(() => {
+        if (!publishDepartment || !completeDepartments.includes(publishDepartment)) setPublishLevel('');
+        if (!publishLevel || !publishLevelOptions.includes(publishLevel)) setPublishGroupId('');
+        if (publishGroupId && !publishGroupOptions.some((x) => x.groupId === publishGroupId)) setPublishGroupId('');
+    }, [publishDepartment, publishLevel, publishLevelOptions, publishGroupOptions, completeDepartments]);
+
     return (
         <div className="space-y-6 p-6">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
@@ -764,11 +865,33 @@ export default function LectureScheduler({ activeSession: propsSession, activeSe
                     )}
                     <p className="text-sm text-slate-600 mt-1">Assign lecturers, courses, and class groups to venues and time slots. Venues are shared school-wide; if a venue is already booked for the same day and time, you’ll see an error. Choose another venue or time.</p>
                 </div>
-                {sessionSemesterLabel && (
-                    <span className="inline-flex items-center px-3 py-1.5 rounded-md bg-[#0f2044] text-white text-sm font-medium shrink-0">
-                        <Calendar className="w-4 h-4 mr-2" />
-                        {sessionSemesterLabel}
-                    </span>
+                {activeSession && (
+                    <div className="flex flex-wrap items-center gap-2 shrink-0">
+                        <span className="inline-flex items-center px-3 py-1.5 rounded-md bg-[#0f2044] text-white text-sm font-medium">
+                            <Calendar className="w-4 h-4 mr-2" />
+                            {(activeSession.name || '').replace(/-/g, '/')}
+                        </span>
+                        {semestersList.length > 0 && (
+                            <label className="flex items-center gap-2 text-sm">
+                                <span className="font-medium text-slate-700">Semester:</span>
+                                <select
+                                    value={activeSemester ? String(activeSemester.semester_id ?? activeSemester.id ?? '') : ''}
+                                    onChange={(e) => {
+                                        const id = e.target.value ? Number(e.target.value) : null;
+                                        const sem = semestersList.find((s: any) => (s.semester_id ?? s.id) === id);
+                                        if (sem) setSelectedSemester(sem);
+                                    }}
+                                    className="px-3 py-1.5 border border-slate-300 rounded-md bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#ffb71b] focus:border-transparent min-w-[140px]"
+                                >
+                                    {semestersList.map((s: any) => (
+                                        <option key={s.semester_id ?? s.id} value={s.semester_id ?? s.id}>
+                                            {s.name || 'Semester'}
+                                        </option>
+                                    ))}
+                                </select>
+                            </label>
+                        )}
+                    </div>
                 )}
             </div>
 
@@ -1203,8 +1326,8 @@ export default function LectureScheduler({ activeSession: propsSession, activeSe
                 </CardContent>
             </Card>
 
-            {/* Generate Timetable & Submit for Approval */}
-            {timetableEntries.length > 0 && (allCoursesScheduled || timetablePublished) && (
+            {/* Finalize & Publish – only completed schedules (no pending course) in dropdowns; then Approve/Reject popup to publish */}
+            {timetableEntries.length > 0 && (
                 <Card className="border border-slate-200 shadow-md">
                     <CardHeader className="bg-gradient-to-r from-[#0f2044] to-[#1a3a5c] text-white rounded-t-lg">
                         <CardTitle className="flex items-center gap-2">
@@ -1213,63 +1336,74 @@ export default function LectureScheduler({ activeSession: propsSession, activeSe
                         </CardTitle>
                     </CardHeader>
                     <CardContent className="p-6 space-y-4">
-                        {!allCoursesScheduled && !timetablePublished && (
+                        <p className="text-sm text-slate-600">
+                            Select the department, level and group you intend to publish the timetable for. Only completed schedules (no pending course) appear below.
+                        </p>
+                        {completeGroupsList.length === 0 ? (
                             <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg">
-                                <p className="text-sm font-medium text-amber-800">
-                                    {isPostSiwesSemester
-                                        ? 'You cannot publish until each course has 6 hours scheduled for every class'
-                                        : isSummerSemester
-                                        ? 'You cannot publish until each course has 2 hours scheduled for every class'
-                                        : 'You cannot publish until each course has its required hours (by credit units) scheduled for every class'}
-                                </p>
+                                <p className="text-sm font-medium text-amber-800">No completed schedule yet</p>
                                 <p className="text-sm text-amber-700 mt-1">
-                                    {isPostSiwesSemester
-                                        ? `${scheduledCount} of ${totalCount} class–course combinations have 6 hours scheduled. ${missingCount} still need 6 hours each.`
-                                        : isSummerSemester
-                                        ? `${scheduledCount} of ${totalCount} class–course combinations have 2 hours scheduled. ${missingCount} still need 2 hours each.`
-                                        : `${scheduledCount} of ${totalCount} class–course combinations have required hours. ${missingCount} still need their required hours (2 or 3 by credit units).`}
+                                    Complete all required courses for at least one group (department + level + group) so it appears in the dropdowns. Progress: {scheduledCount} of {totalCount} class–course combinations complete ({missingCount} remaining).
                                 </p>
                             </div>
-                        )}
-                        {timetablePublished ? (
-                            <p className="text-sm text-slate-600">
-                                Timetable is live on the student landing page. Make any changes above, then click below to update and re-publish so students see the latest version.
-                            </p>
                         ) : (
-                            <p className="text-sm text-slate-600">
-                                Once all courses are scheduled, generate the full class timetable and submit for approval. Approve to publish to the student landing page, or Reject to return to the schedule editor.
-                            </p>
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-700 mb-1">Department</label>
+                                    <select
+                                        value={publishDepartment}
+                                        onChange={(e) => { setPublishDepartment(e.target.value); setPublishLevel(''); setPublishGroupId(''); }}
+                                        className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[#ffb71b]"
+                                    >
+                                        <option value="">Select department</option>
+                                        {completeDepartments.map((d) => (
+                                            <option key={d} value={d}>{d}</option>
+                                        ))}
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-700 mb-1">Level</label>
+                                    <select
+                                        value={publishLevel}
+                                        onChange={(e) => { setPublishLevel(e.target.value); setPublishGroupId(''); }}
+                                        className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[#ffb71b]"
+                                        disabled={!publishDepartment}
+                                    >
+                                        <option value="">Select level</option>
+                                        {publishLevelOptions.map((lv) => (
+                                            <option key={lv} value={lv}>{lv}</option>
+                                        ))}
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-700 mb-1">Group</label>
+                                    <select
+                                        value={publishGroupId === '' ? '' : String(publishGroupId)}
+                                        onChange={(e) => setPublishGroupId(e.target.value ? Number(e.target.value) : '')}
+                                        className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[#ffb71b]"
+                                        disabled={!publishLevel}
+                                    >
+                                        <option value="">Select group</option>
+                                        {publishGroupOptions.map((g) => (
+                                            <option key={g.groupId} value={g.groupId}>{g.groupName}</option>
+                                        ))}
+                                    </select>
+                                </div>
+                            </div>
                         )}
-                        {!allCoursesScheduled && !timetablePublished && (
-                            <p className="text-amber-700 text-sm font-medium">
-                                {isPostSiwesSemester
-                                    ? `You cannot finalize until each course has 6 hours scheduled for every class (${scheduledCount} of ${totalCount} done).`
-                                    : isSummerSemester
-                                    ? `You cannot finalize until each course has 2 hours scheduled for every class (${scheduledCount} of ${totalCount} done).`
-                                    : `You cannot finalize until each course has its required hours (2 or 3 by credit units) per class (${scheduledCount} of ${totalCount} done).`}
+                        {timetablePublished && (
+                            <p className="text-sm text-green-700 font-medium">
+                                Timetable is live on the landing page. You can always edit or delete entries above; the next time you push to the landing page it will show as <strong>Re-publish</strong>.
                             </p>
                         )}
                         <Button
                             type="button"
-                            onClick={async () => {
-                                if (!timetablePublished && !allCoursesScheduled) return;
-                                const semesterId = activeSemester?.semester_id ?? activeSemester?.id;
-                                if (!semesterId) {
-                                    setShowApproveModal(true);
-                                    return;
-                                }
-                                const check = await (api as any).canPublishSemester(semesterId) as { success?: boolean; data?: { canPublish?: boolean; message?: string } };
-                                if (check?.success && check?.data && !check.data.canPublish) {
-                                    toast.error(check.data.message || 'Schedule all courses for every class before publishing.');
-                                    return;
-                                }
-                                setShowApproveModal(true);
-                            }}
-                            disabled={!timetablePublished && !allCoursesScheduled}
+                            onClick={() => setShowApproveModal(true)}
+                            disabled={completeGroupsList.length === 0 || !publishGroupId}
                             className="bg-[#0f2044] text-white hover:bg-[#1a3a5c] disabled:opacity-50 disabled:pointer-events-none"
                         >
                             <Send className="w-4 h-4 mr-2" />
-                            {timetablePublished ? 'Update & Re-publish to Landing Page' : 'Generate Timetable & Submit for Approval'}
+                            {timetablePublished ? 'Update & Re-publish to Landing Page' : 'Publish Timetable'}
                         </Button>
                     </CardContent>
                 </Card>
@@ -1277,20 +1411,20 @@ export default function LectureScheduler({ activeSession: propsSession, activeSe
             </>
             ) : null}
 
-            {/* Approval / Publish workflow modal */}
+            {/* Approve / Reject popup: publish timetable to landing page so users see it when they select department, level and group */}
             <Dialog open={showApproveModal} onOpenChange={setShowApproveModal}>
                 <DialogContent className="sm:max-w-xl">
                     <DialogHeader>
-                        <DialogTitle>{timetablePublished ? 'Update & Re-publish Timetable' : 'Generate Timetable – Approval'}</DialogTitle>
+                        <DialogTitle>{timetablePublished ? 'Re-publish Timetable' : 'Publish Timetable'}</DialogTitle>
                         <DialogDescription>
                             {timetablePublished
-                                ? `Review the schedule for ${sessionSemesterLabel || 'this session'}. Save and re-publish to update the student landing page with your latest changes.`
-                                : `Review the schedule for ${sessionSemesterLabel || 'this session'}. Approve to publish to the student landing page, or Reject to return to the editor.`}
+                                ? `Re-publish the timetable for ${sessionSemesterLabel || 'this session'} so the student landing page shows your latest changes.`
+                                : `Publish the timetable for ${sessionSemesterLabel || 'this session'}. Students will see their schedule on the landing page when they select their department, level and group.`}
                         </DialogDescription>
                     </DialogHeader>
                     <div className="py-2">
                         <p className="text-sm text-slate-700">
-                            <span className="font-medium">{timetableEntries.length}</span> schedule entries will be {timetablePublished ? 'updated and re-' : ''}published. Students will be able to view and download their class timetable as PDF.
+                            <span className="font-medium">{timetableEntries.length}</span> schedule entries will be {timetablePublished ? 'updated and re-' : ''}published. Approve to go live; Reject to stay in the editor.
                         </p>
                     </div>
                     <DialogFooter>
@@ -1300,7 +1434,7 @@ export default function LectureScheduler({ activeSession: propsSession, activeSe
                             onClick={() => setShowApproveModal(false)}
                             disabled={approving}
                         >
-                            {timetablePublished ? 'Cancel' : 'Reject (Return to Editor)'}
+                            Reject
                         </Button>
                         <Button
                             type="button"
@@ -1314,8 +1448,9 @@ export default function LectureScheduler({ activeSession: propsSession, activeSe
                                 try {
                                     const res = await (api as any).updateSemester(semesterId, { timetable_status: 'published' }) as any;
                                     if (res?.success) {
-                                        toast.success(timetablePublished ? 'Timetable updated and re-published to the landing page.' : 'Timetable published. Students can now view and download their schedules.');
+                                        toast.success(timetablePublished ? 'Timetable re-published. Students will see the update on the landing page.' : 'Timetable published. Students can view their schedule by selecting department, level and group on the landing page.');
                                         onTimetablePublished?.();
+                                        setSelectedSemester((prev: any) => prev ? { ...prev, timetable_status: 'published' } : null);
                                         setShowApproveModal(false);
                                     } else {
                                         toast.error(res?.error || 'Failed to publish timetable');
@@ -1335,10 +1470,8 @@ export default function LectureScheduler({ activeSession: propsSession, activeSe
                                     <Clock className="w-4 h-4 mr-2 animate-spin" />
                                     {timetablePublished ? 'Updating…' : 'Publishing…'}
                                 </>
-                            ) : timetablePublished ? (
-                                'Update & Re-publish to Landing Page'
                             ) : (
-                                'Approve (Publish to Students)'
+                                'Approve'
                             )}
                         </Button>
                     </DialogFooter>

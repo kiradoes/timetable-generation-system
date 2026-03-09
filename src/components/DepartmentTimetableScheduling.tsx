@@ -1,9 +1,17 @@
-import { AlertCircle, BookOpen, Calendar, CheckCircle2, Clock, Edit2, Filter, Plus, Trash2 } from 'lucide-react';
+import { AlertCircle, BookOpen, Calendar, CheckCircle2, Clock, Edit2, Filter, Plus, Send, Trash2 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import api from '../services/api';
 import { Button } from './ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+} from './ui/dialog';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 
@@ -58,7 +66,11 @@ const DURATIONS = [
     { value: 3, label: '3 Hours' },
 ];
 
-export function DepartmentTimetableScheduling({ departmentName, sessionId, activeSemester }: DepartmentTimetableSchedulingProps) {
+export function DepartmentTimetableScheduling({ departmentName, sessionId, activeSemester: propsActiveSemester }: DepartmentTimetableSchedulingProps) {
+    const [semestersList, setSemestersList] = useState<any[]>([]);
+    const [selectedSemester, setSelectedSemester] = useState<{ name: string; semester_id?: number } | null>(null);
+    const activeSemester = selectedSemester ?? propsActiveSemester ?? null;
+
     const [schedules, setSchedules] = useState<ScheduleEntry[]>([]);
     const [courses, setCourses] = useState<any[]>([]);
     const [lecturers, setLecturers] = useState<any[]>([]);
@@ -85,12 +97,42 @@ export function DepartmentTimetableScheduling({ departmentName, sessionId, activ
     const [filterCourse, setFilterCourse] = useState<string>('');
     const [filterVenue, setFilterVenue] = useState<string>('');
     const [filterClass, setFilterClass] = useState<string>('');
+    const [showApproveModal, setShowApproveModal] = useState(false);
+    const [approving, setApproving] = useState(false);
 
     useEffect(() => {
         if (departmentName && sessionId) {
             fetchAllData();
         }
     }, [departmentName, sessionId]);
+
+    // Fetch all semesters for the session so user can select First, Second, Summer, or Post-SIWES (6-hour logic)
+    useEffect(() => {
+        if (!sessionId) {
+            setSemestersList([]);
+            setSelectedSemester(null);
+            return;
+        }
+        const loadSemesters = async () => {
+            try {
+                const res = await api.getSemestersBySession(sessionId) as any;
+                const list = Array.isArray(res?.data) ? res.data : [];
+                setSemestersList(list);
+                if (list.length > 0) {
+                    const active = list.find((s: any) => s.status === 'active');
+                    const matchProp = propsActiveSemester && list.find((s: any) => (s.semester_id ?? s.id) === (propsActiveSemester.semester_id ?? (propsActiveSemester as any).id));
+                    setSelectedSemester(matchProp ?? active ?? list[0]);
+                } else {
+                    setSelectedSemester(null);
+                }
+            } catch (e) {
+                console.error('Failed to fetch semesters:', e);
+                setSemestersList([]);
+                setSelectedSemester(null);
+            }
+        };
+        loadSemesters();
+    }, [sessionId, propsActiveSemester?.semester_id]);
 
     // When semester changes, clear level, class group, and course so the user picks a class for the current semester. Lecturers and courses lists stay populated.
     useEffect(() => {
@@ -120,7 +162,29 @@ export function DepartmentTimetableScheduling({ departmentName, sessionId, activ
                 const computingOnly = list.filter((c: any) => !['GEDS', 'SAT'].includes(c.category || ''));
                 setCourses(computingOnly);
             }
-            if (lecturersRes.success) setLecturers(Array.isArray(lecturersRes.data) ? lecturersRes.data : (lecturersRes.data?.lecturers || []));
+            // Prefer lecturers for this session + department; if none found (e.g. lecturers not tied to the current session),
+            // fall back to department-only, then all lecturers, and filter to active ones so the dropdown is never empty unnecessarily.
+            if (lecturersRes.success) {
+                let lecList: any[] = Array.isArray(lecturersRes.data) ? lecturersRes.data : (lecturersRes.data?.lecturers || []);
+                if ((!lecList || lecList.length === 0) && departmentName) {
+                    const fallbackByDept = await api.getLecturers({ department: departmentName }) as any;
+                    if (fallbackByDept?.success) {
+                        lecList = Array.isArray(fallbackByDept.data) ? fallbackByDept.data : (fallbackByDept.data?.lecturers || []);
+                    }
+                }
+                if (!lecList || lecList.length === 0) {
+                    const fallbackAll = await api.getLecturers({}) as any;
+                    if (fallbackAll?.success) {
+                        lecList = Array.isArray(fallbackAll.data) ? fallbackAll.data : (fallbackAll.data?.lecturers || []);
+                    }
+                }
+                if (lecList && lecList.length > 0) {
+                    const activeLecturers = lecList.filter((l: any) => (l.status ?? 'active') === 'active');
+                    setLecturers(activeLecturers);
+                } else {
+                    setLecturers([]);
+                }
+            }
             if (groupsRes.success) setGroups(Array.isArray(groupsRes.data) ? groupsRes.data : (groupsRes.data?.groups || []));
             if (venuesRes.success) setVenues(Array.isArray(venuesRes.data) ? venuesRes.data : (venuesRes.data?.venues || []));
             if (schedulesRes.success) setSchedules(Array.isArray(schedulesRes.data) ? schedulesRes.data : []);
@@ -517,6 +581,41 @@ export function DepartmentTimetableScheduling({ departmentName, sessionId, activ
         return a.start_time.localeCompare(b.start_time);
     });
 
+    const requiredHoursForSemester = isPostSiwesSemester ? 6 : isSummerSemester ? 2 : null;
+    const completeGroupsList = useMemo(() => {
+        const list: { level: string; groupName: string; groupId: number }[] = [];
+        for (const g of groups) {
+            const gLevel = g.level != null ? String(g.level) : '';
+            const requiredCourses = courses.filter((c: any) => {
+                if ((c as any).category === 'GEDS' || (c as any).category === 'SAT') return false;
+                if (gLevel && (c as any).level != null && String((c as any).level) !== gLevel) return false;
+                return true;
+            });
+            if (requiredCourses.length === 0) continue;
+            let allComplete = true;
+            for (const c of requiredCourses) {
+                const key = `${Number(c.course_id ?? c.id)}-${Number(g.group_id ?? g.id)}`;
+                const hours = scheduledHoursByCourseGroup.get(key) || 0;
+                const required = requiredHoursForSemester != null ? requiredHoursForSemester : (Number((c as any).credit_units) || 2);
+                if (hours < required) {
+                    allComplete = false;
+                    break;
+                }
+            }
+            if (allComplete) list.push({ level: gLevel, groupName: g.name ?? '', groupId: g.group_id ?? g.id });
+        }
+        return list;
+    }, [groups, courses, scheduledHoursByCourseGroup, requiredHoursForSemester]);
+
+    const [publishLevel, setPublishLevel] = useState('');
+    const [publishGroupId, setPublishGroupId] = useState<number | ''>('');
+    const publishLevelOptions = useMemo(() => [...new Set(completeGroupsList.map((x) => x.level))].sort((a, b) => Number(a) - Number(b)), [completeGroupsList]);
+    const publishGroupOptions = useMemo(() => completeGroupsList.filter((x) => String(x.level) === String(publishLevel)), [completeGroupsList, publishLevel]);
+    useEffect(() => {
+        if (!publishLevel || !publishLevelOptions.includes(publishLevel)) setPublishGroupId('');
+        if (publishGroupId && !publishGroupOptions.some((x) => x.groupId === publishGroupId)) setPublishGroupId('');
+    }, [publishLevel, publishLevelOptions, publishGroupOptions]);
+
     return (
         <div className="space-y-6">
             <div className="flex justify-between items-center flex-wrap gap-2">
@@ -526,10 +625,32 @@ export function DepartmentTimetableScheduling({ departmentName, sessionId, activ
                         The School Timetable Officer can view and reschedule your department’s lectures. If they make changes, refresh this page to see the latest timetable.
                     </p>
                 </div>
-                <Button onClick={() => { setShowForm(!showForm); setEditingId(null); }} className="bg-[#0f2044] hover:bg-[#0f2044]/90 text-white">
-                    <Plus className="h-4 w-4 mr-2" />
-                    {showForm ? 'Cancel' : 'Add Schedule'}
-                </Button>
+                <div className="flex items-center gap-2 flex-wrap">
+                    {semestersList.length > 0 && (
+                        <label className="flex items-center gap-2 text-sm">
+                            <span className="font-medium text-slate-700">Semester:</span>
+                            <select
+                                value={activeSemester ? String(activeSemester.semester_id ?? (activeSemester as any).id ?? '') : ''}
+                                onChange={(e) => {
+                                    const id = e.target.value ? Number(e.target.value) : null;
+                                    const sem = semestersList.find((s: any) => (s.semester_id ?? s.id) === id);
+                                    if (sem) setSelectedSemester(sem);
+                                }}
+                                className="px-3 py-1.5 border border-slate-300 rounded-md bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#ffb71b] focus:border-transparent min-w-[140px]"
+                            >
+                                {semestersList.map((s: any) => (
+                                    <option key={s.semester_id ?? s.id} value={s.semester_id ?? s.id}>
+                                        {s.name || 'Semester'}
+                                    </option>
+                                ))}
+                            </select>
+                        </label>
+                    )}
+                    <Button onClick={() => { setShowForm(!showForm); setEditingId(null); }} className="bg-[#0f2044] hover:bg-[#0f2044]/90 text-white">
+                        <Plus className="h-4 w-4 mr-2" />
+                        {showForm ? 'Cancel' : 'Add Schedule'}
+                    </Button>
+                </div>
             </div>
 
             {showForm && (
@@ -852,6 +973,128 @@ export function DepartmentTimetableScheduling({ departmentName, sessionId, activ
                     )}
                 </CardContent>
             </Card>
+
+            {/* Finalize & Publish – only completed schedules (Level + Group) in dropdowns; then Approve/Reject popup */}
+            {sortedSchedules.length > 0 && (
+                <Card className="border border-slate-200 shadow-md">
+                    <CardHeader className="bg-gradient-to-r from-[#0f2044] to-[#1a3a5c] text-white rounded-t-lg">
+                        <CardTitle className="flex items-center gap-2">
+                            <Send className="w-6 h-6" />
+                            Finalize & Publish
+                        </CardTitle>
+                    </CardHeader>
+                    <CardContent className="p-6 space-y-4">
+                        <p className="text-sm text-slate-600">
+                            Select the level and group you intend to publish the timetable for. Only completed schedules (no pending course) appear below.
+                        </p>
+                        {completeGroupsList.length === 0 ? (
+                            <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg">
+                                <p className="text-sm font-medium text-amber-800">No completed schedule yet</p>
+                                <p className="text-sm text-amber-700 mt-1">Complete all required courses for at least one group so it appears below. Then you can publish.</p>
+                            </div>
+                        ) : (
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-700 mb-1">Department</label>
+                                    <div className="px-3 py-2 border border-slate-200 rounded-md bg-slate-50 text-slate-700">{departmentName}</div>
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-700 mb-1">Level</label>
+                                    <select
+                                        value={publishLevel}
+                                        onChange={(e) => { setPublishLevel(e.target.value); setPublishGroupId(''); }}
+                                        className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[#ffb71b]"
+                                    >
+                                        <option value="">Select level</option>
+                                        {publishLevelOptions.map((lv) => (
+                                            <option key={lv} value={lv}>{lv}</option>
+                                        ))}
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-700 mb-1">Group</label>
+                                    <select
+                                        value={publishGroupId === '' ? '' : String(publishGroupId)}
+                                        onChange={(e) => setPublishGroupId(e.target.value ? Number(e.target.value) : '')}
+                                        className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[#ffb71b]"
+                                        disabled={!publishLevel}
+                                    >
+                                        <option value="">Select group</option>
+                                        {publishGroupOptions.map((g) => (
+                                            <option key={g.groupId} value={g.groupId}>{g.groupName}</option>
+                                        ))}
+                                    </select>
+                                </div>
+                            </div>
+                        )}
+                        {(activeSemester as any)?.timetable_status === 'published' && (
+                            <p className="text-sm text-green-700 font-medium">Timetable is live on the landing page. You can re-publish after changes.</p>
+                        )}
+                        <Button
+                            type="button"
+                            onClick={() => setShowApproveModal(true)}
+                            disabled={completeGroupsList.length === 0 || !publishGroupId}
+                            className="bg-[#0f2044] text-white hover:bg-[#1a3a5c] disabled:opacity-50 disabled:pointer-events-none"
+                        >
+                            <Send className="w-4 h-4 mr-2" />
+                            {(activeSemester as any)?.timetable_status === 'published' ? 'Update & Re-publish to Landing Page' : 'Publish Timetable'}
+                        </Button>
+                    </CardContent>
+                </Card>
+            )}
+
+            <Dialog open={showApproveModal} onOpenChange={setShowApproveModal}>
+                <DialogContent className="sm:max-w-xl">
+                    <DialogHeader>
+                        <DialogTitle>{(activeSemester as any)?.timetable_status === 'published' ? 'Re-publish Timetable' : 'Publish Timetable'}</DialogTitle>
+                        <DialogDescription>
+                            {(activeSemester as any)?.timetable_status === 'published'
+                                ? `Re-publish the timetable for ${activeSemester?.name || 'this semester'} so the student landing page shows your latest changes.`
+                                : `Publish the timetable for ${activeSemester?.name || 'this semester'}. Students will see their schedule on the landing page when they select their department, level and group.`}
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="py-2">
+                        <p className="text-sm text-slate-700">
+                            <span className="font-medium">{sortedSchedules.length}</span> schedule entries will be {(activeSemester as any)?.timetable_status === 'published' ? 'updated and re-' : ''}published. Approve to go live; Reject to stay in the editor.
+                        </p>
+                    </div>
+                    <DialogFooter>
+                        <Button type="button" variant="outline" onClick={() => setShowApproveModal(false)} disabled={approving}>Reject</Button>
+                        <Button
+                            type="button"
+                            onClick={async () => {
+                                const semesterId = activeSemester?.semester_id ?? (activeSemester as any)?.id;
+                                if (!semesterId) {
+                                    toast.error('No active semester selected.');
+                                    return;
+                                }
+                                setApproving(true);
+                                try {
+                                    const res = await (api as any).updateSemester(semesterId, { timetable_status: 'published' }) as any;
+                                    if (res?.success) {
+                                        toast.success((activeSemester as any)?.timetable_status === 'published'
+                                            ? 'Timetable re-published. Students will see the update on the landing page.'
+                                            : 'Timetable published. Students can view their schedule by selecting department, level and group on the landing page.');
+                                        setShowApproveModal(false);
+                                        setSelectedSemester((prev: any) => prev ? { ...prev, timetable_status: 'published' } : null);
+                                    } else {
+                                        toast.error(res?.error || 'Failed to publish timetable');
+                                    }
+                                } catch (e) {
+                                    toast.error('Failed to publish timetable');
+                                    console.error(e);
+                                } finally {
+                                    setApproving(false);
+                                }
+                            }}
+                            disabled={approving}
+                            className="bg-[#0f2044] text-white hover:bg-[#1a3a5c]"
+                        >
+                            {approving ? <><Clock className="w-4 h-4 mr-2 animate-spin" />{(activeSemester as any)?.timetable_status === 'published' ? 'Updating…' : 'Publishing…'}</> : 'Approve'}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </div>
     );
 }
