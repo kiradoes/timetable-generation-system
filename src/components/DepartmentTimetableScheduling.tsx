@@ -339,12 +339,14 @@ export function DepartmentTimetableScheduling({ departmentName, sessionId, activ
                 if (atMax) return editingId != null && Number(editingEntryCourseId) === courseId;
                 return true;
             }
-            const scheduledCount = scheduledCountByCourseGroup.get(key) || 0;
-            const atMaxSlots = scheduledCount >= 2;
-            if (atMaxSlots) return editingId != null && Number(editingEntryCourseId) === courseId;
+            // First/Second: course disappears after total hours >= credit_units (2 or 3)
+            const requiredHours = (c as any).credit_units != null ? Number((c as any).credit_units) : 3;
+            const hours = scheduledHoursByCourseGroup.get(key) || 0;
+            const atMax = hours >= requiredHours;
+            if (atMax) return editingId != null && Number(editingEntryCourseId) === courseId;
             return true;
         });
-    }, [coursesByLevel, formData.class_group_id, scheduledCountByCourseGroup, scheduledHoursByCourseGroup, isPostSiwesSemester, isSummerSemester, editingId, editingEntryCourseId]);
+    }, [coursesByLevel, formData.class_group_id, scheduledHoursByCourseGroup, isPostSiwesSemester, isSummerSemester, editingId, editingEntryCourseId]);
 
     // Clear course selection when it's no longer in the list (e.g. just reached 2 slots for this class)
     useEffect(() => {
@@ -647,7 +649,7 @@ export function DepartmentTimetableScheduling({ departmentName, sessionId, activ
                                             ? 'Post-SIWES: each course needs 6 hours total per group. It disappears from the list once 6 hours are scheduled.'
                                             : isSummerSemester
                                             ? 'Summer: each course needs 2 hours total per group. It disappears from the list once 2 hours are scheduled.'
-                                            : 'Each course can only be scheduled twice per week for a group. It disappears from the list once scheduled twice.'}
+                                            : 'First/Second: each course disappears from the list once its total scheduled hours reach the course credit units (e.g. 2-unit after 2 hours, 3-unit after 3 hours).'}
                                     </p>
                                 </div>
                             </div>

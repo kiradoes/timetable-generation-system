@@ -5,6 +5,7 @@ import {
   Calendar,
   Clock,
   GraduationCap,
+  LayoutGrid,
   MapPin,
   Settings,
   UserPlus,
@@ -18,6 +19,8 @@ import { DepartmentManagement } from './DepartmentManagement';
 import LectureScheduler from './LectureScheduler';
 import { NonComputingCourseManagement } from './NonComputingCourseManagement';
 import { OfficerManagement } from './OfficerManagement';
+import { SchoolClassGroupsManagement } from './SchoolClassGroupsManagement';
+import { SchoolComputingCoursesManagement } from './SchoolComputingCoursesManagement';
 import { SchoolLecturerPreferences } from './SchoolLecturerPreferences';
 import { SpecialEventsPanel } from './SpecialEventsPanel';
 import { VenueManagement } from './VenueManagement';
@@ -99,6 +102,8 @@ export function SchoolOfficerDashboard({ userEmail, onLogout }: { userEmail: str
     { name: 'Academic Settings', icon: Settings, active: activeView === 'academic-settings', onClick: () => setActiveView('academic-settings'), description: 'Manage sessions and semesters' },
     { name: 'Department Management', icon: Building2, active: activeView === 'department-management', onClick: () => setActiveView('department-management'), description: 'Manage departments (active/inactive)' },
     { name: 'Officer Management', icon: UserPlus, active: activeView === 'officer-management', onClick: () => setActiveView('officer-management'), description: 'Add/Remove Department Timetable Officers' },
+    { name: 'Class Management', icon: LayoutGrid, active: activeView === 'class-management', onClick: () => setActiveView('class-management'), description: 'Manage class groups by department (same layout as DTTO)' },
+    { name: 'Course Management', icon: BookOpen, active: activeView === 'computing-courses-management', onClick: () => setActiveView('computing-courses-management'), description: 'Computing courses by department with search' },
     { name: 'Non-Computing Courses Management', icon: BookOpen, active: activeView === 'courses-management', onClick: () => setActiveView('courses-management'), description: 'External courses: Course code, title, lecturer, class/group, day, time' },
     { name: 'Lecturer Preferences', icon: Users, active: activeView === 'lecturer-preferences', onClick: () => setActiveView('lecturer-preferences'), description: 'Logic engine: Add lecturer (name, department), set unavailable days/times' },
     { name: 'Venue Management', icon: MapPin, active: activeView === 'venue-management', onClick: () => setActiveView('venue-management'), description: 'Add and manage venues (lecture halls, labs) for scheduling' },
@@ -115,6 +120,10 @@ export function SchoolOfficerDashboard({ userEmail, onLogout }: { userEmail: str
         return <DepartmentManagement />;
       case 'officer-management':
         return <OfficerManagement />;
+      case 'class-management':
+        return <SchoolClassGroupsManagement sessionId={activeSession?.session_id ?? activeSession?.id ?? null} />;
+      case 'computing-courses-management':
+        return <SchoolComputingCoursesManagement sessionId={activeSession?.session_id ?? activeSession?.id ?? null} />;
       case 'courses-management':
         return <NonComputingCourseManagement />;
       case 'lecturer-preferences':
@@ -198,6 +207,14 @@ function OverviewView({ activeSession, activeSemester, onNavigate }: {
             <Button onClick={() => onNavigate('officer-management')} className="flex flex-col items-center gap-2 bg-[#0f2044] hover:bg-[#0f2044]/90 text-white py-6 h-auto">
               <UserPlus className="size-6" />
               <span>Register Officer</span>
+            </Button>
+            <Button onClick={() => onNavigate('class-management')} variant="outline" className="flex flex-col items-center gap-2 border-[#0f2044] text-[#0f2044] hover:bg-[#0f2044]/5 py-6 h-auto">
+              <LayoutGrid className="size-6" />
+              <span>Class Management</span>
+            </Button>
+            <Button onClick={() => onNavigate('computing-courses-management')} variant="outline" className="flex flex-col items-center gap-2 border-[#0f2044] text-[#0f2044] hover:bg-[#0f2044]/5 py-6 h-auto">
+              <BookOpen className="size-6" />
+              <span>Course Management</span>
             </Button>
             <Button onClick={() => onNavigate('courses-management')} variant="outline" className="flex flex-col items-center gap-2 border-[#0f2044] text-[#0f2044] hover:bg-[#0f2044]/5 py-6 h-auto">
               <BookOpen className="size-6" />

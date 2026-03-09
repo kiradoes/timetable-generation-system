@@ -1023,11 +1023,11 @@ class ApiService {
 
   // ========== SEMESTER HOURS (static logic) ==========
   // How many hours per (course, class group) for each semester type. Used by checkCourseHoursForGroup and canPublishSemester.
-  // - First / Second: not hours-based; max 2 SLOTS per week per (course, group). Publish = every required course scheduled at least once.
+  // - First / Second: required hours = course.credit_units (default FIRST_SECOND_DEFAULT_HOURS). Course clears from dropdown when scheduled hours ≥ that. Publish = every (course, class) has ≥ credit_units hours.
   // - Summer: 2 HOURS total per (course, group). Publish = every required (course, class) has ≥ 2 hours.
   // - Post-SIWES: 6 HOURS total per (course, group). Publish = every required (course, class) has ≥ 6 hours.
   // Semester is identified by name: "summer" (or includes "summer"), "post-siwes" (or "post siwes"); everything else = First/Second.
-  static SEMESTER_HOURS = { SUMMER_HOURS: 2, POST_SIWES_HOURS: 6, FIRST_SECOND_SLOTS_PER_WEEK: 2 };
+  static SEMESTER_HOURS = { SUMMER_HOURS: 2, POST_SIWES_HOURS: 6, FIRST_SECOND_DEFAULT_HOURS: 2 };
 
   /**
    * Check if the timetable for this semester can be published.
@@ -1045,7 +1045,7 @@ class ApiService {
     const isSummer = semesterName === 'summer' || semesterName.includes('summer');
 
     const { data: groups } = await supabase.from('class_groups').select('group_id, department, level').eq('session_id', sessionId).eq('status', 'active');
-    const { data: courses } = await supabase.from('courses').select('course_id, course_code, title, department, level, category').eq('session_id', sessionId).eq('status', 'active');
+    const { data: courses } = await supabase.from('courses').select('course_id, course_code, title, department, level, category, credit_units').eq('session_id', sessionId).eq('status', 'active');
 
     const checkHoursSemester = async (requiredHours) => {
       const schedRes = await this.getSchedulesWithDetails({ session_id: sessionId });
@@ -1115,8 +1115,23 @@ class ApiService {
       return this.handleResponse({ canPublish: true, message: `All required courses have ${required} hours scheduled per class.` }, null);
     }
 
-    const { data: scheduleRows } = await supabase.from('schedules').select('group_id, course_id').eq('session_id', sessionId);
-    const scheduledSet = new Set((scheduleRows || []).map((r) => `${r.group_id}-${r.course_id}`));
+    // First/Second: each (course, class) must have total scheduled hours >= course credit_units (2 or 3)
+    const schedRes = await this.getSchedulesWithDetails({ session_id: sessionId });
+    const scheduleRows = (schedRes.success && Array.isArray(schedRes.data)) ? schedRes.data : [];
+    const inThisSemester = scheduleRows.filter((row) => (row.semester_id ?? null) === semesterId);
+    const toMinutes = (t) => {
+      if (!t) return 0;
+      const [h, m] = String(t).slice(0, 5).split(':').map(Number);
+      return (h || 0) * 60 + (m || 0);
+    };
+    const hoursByKey = new Map();
+    for (const row of inThisSemester) {
+      const key = `${row.class_group_id ?? row.group_id}-${row.course_id}`;
+      const start = toMinutes(row.start_time);
+      const end = toMinutes(row.end_time);
+      const mins = end > start ? end - start : 0;
+      hoursByKey.set(key, (hoursByKey.get(key) || 0) + mins);
+    }
     const missing = [];
     for (const g of groups || []) {
       const dept = g.department || '';
@@ -1126,18 +1141,28 @@ class ApiService {
         if ((c.department || '') !== dept) continue;
         if (lvl != null && c.level != null && Number(c.level) !== lvl) continue;
         const key = `${g.group_id}-${c.course_id}`;
-        if (!scheduledSet.has(key)) missing.push({ group: `${g.level}L ${g.department}`, course: c.course_code || c.title || 'Course' });
+        const requiredHrs = c.credit_units != null ? Number(c.credit_units) : ApiService.SEMESTER_HOURS.FIRST_SECOND_DEFAULT_HOURS;
+        const requiredMins = requiredHrs * 60;
+        const totalMins = hoursByKey.get(key) || 0;
+        if (totalMins < requiredMins) {
+          missing.push({
+            group: `${g.level}L ${g.department}`,
+            course: c.course_code || c.title || 'Course',
+            hoursScheduled: Math.round(totalMins / 60),
+            required: requiredHrs,
+          });
+        }
       }
     }
     if (missing.length > 0) {
-      const list = missing.slice(0, 10).map((m) => `${m.course} (${m.group})`).join('; ');
+      const list = missing.slice(0, 10).map((m) => `${m.course} (${m.group}): ${m.hoursScheduled ?? 0}/${m.required} hrs`).join('; ');
       return this.handleResponse({
         canPublish: false,
-        message: `Cannot publish: the following courses are not yet scheduled for their class: ${list}${missing.length > 10 ? ` and ${missing.length - 10} more.` : '.'} Schedule all courses before publishing.`,
+        message: `Cannot publish: each course must have its required hours (by credit units) scheduled per class. Missing or incomplete: ${list}${missing.length > 10 ? ` and ${missing.length - 10} more.` : '.'}`,
         missing,
       }, null);
     }
-    return this.handleResponse({ canPublish: true, message: 'All required courses are scheduled.' }, null);
+    return this.handleResponse({ canPublish: true, message: 'All required courses have their required hours scheduled per class.' }, null);
   }
 
   async updateSemester(id, data) {
@@ -1539,7 +1564,7 @@ class ApiService {
 
   /**
    * Check if (course, class group) is at limit for the week.
-   * - First/Second semester: max 2 slots per week per group.
+   * - First/Second semester: total hours per (course, group) must not exceed course credit_units (2 or 3); course disappears after that.
    * - Summer semester: max 2 hours total per (course, group).
    * - Post-SIWES semester: max 6 hours total per (course, group).
    * When semesterId is provided, only schedules in that semester are counted.
@@ -1570,7 +1595,7 @@ class ApiService {
       return (h || 0) * 60 + (m || 0);
     };
 
-    const { POST_SIWES_HOURS, SUMMER_HOURS, FIRST_SECOND_SLOTS_PER_WEEK } = ApiService.SEMESTER_HOURS;
+    const { POST_SIWES_HOURS, SUMMER_HOURS } = ApiService.SEMESTER_HOURS;
 
     if (isPostSiwes) {
       let totalMinutes = 0;
@@ -1626,17 +1651,31 @@ class ApiService {
       return { success: true, overLimit: false };
     }
 
-    const maxSlotsPerWeek = FIRST_SECOND_SLOTS_PER_WEEK;
-    let count = 0;
+    // First/Second: required hours = course credit_units (e.g. 2 or 3); default 2
+    const { data: courseRow } = await supabase.from('courses').select('credit_units').eq('course_id', courseId).maybeSingle();
+    const requiredHours = courseRow?.credit_units != null ? Number(courseRow.credit_units) : ApiService.SEMESTER_HOURS.FIRST_SECOND_DEFAULT_HOURS;
+    const requiredMinutes = requiredHours * 60;
+    let totalMinutes = 0;
     for (const row of rows) {
       if (excludeScheduleId != null && (row.schedule_id === excludeScheduleId || row.id === excludeScheduleId)) continue;
-      count++;
+      const start = toMinutes(row.start_time);
+      const end = toMinutes(row.end_time);
+      if (end > start) totalMinutes += end - start;
     }
-    if (count >= maxSlotsPerWeek) {
+    const durationMins = (typeof durationHours === 'number' ? durationHours * 60 : 0) || 0;
+    const maxMinutes = requiredMinutes;
+    if (totalMinutes >= maxMinutes) {
       return {
         success: true,
         overLimit: true,
-        message: 'This course can only be scheduled twice per week for this class group. It is already scheduled twice.',
+        message: `This course has already reached the required ${requiredHours} hour(s) for this class (First/Second). It cannot be scheduled again for this group.`,
+      };
+    }
+    if (totalMinutes + durationMins > maxMinutes) {
+      return {
+        success: true,
+        overLimit: true,
+        message: `This course would exceed ${requiredHours} hour(s) total for this class (First/Second). Currently ${Math.round(totalMinutes / 60)} hour(s) scheduled; ${requiredHours} hour(s) maximum.`,
       };
     }
     return { success: true, overLimit: false };

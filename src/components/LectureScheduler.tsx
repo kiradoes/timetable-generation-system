@@ -556,17 +556,7 @@ export default function LectureScheduler({ activeSession: propsSession, activeSe
         return (eh - sh) + (em - sm) / 60;
     };
 
-    // First/Second: slot count per (course, group). Summer: 2 hrs. Post-SIWES: 6 hrs per (course, group).
-    const scheduledCountByCourseGroup = useMemo(() => {
-        const map = new Map<string, number>();
-        for (const e of entriesForCounting) {
-            if (editingId != null && e.id === editingId) continue;
-            const key = `${Number(e.course_id)}-${Number(e.class_group_id)}`;
-            map.set(key, (map.get(key) || 0) + 1);
-        }
-        return map;
-    }, [entriesForCounting, editingId]);
-
+    // Total scheduled hours per (course, group). First/Second: by credit_units (2 or 3). Summer: 2 hrs. Post-SIWES: 6 hrs.
     const scheduledHoursByCourseGroup = useMemo(() => {
         const map = new Map<string, number>();
         for (const e of entriesForCounting) {
@@ -618,12 +608,14 @@ export default function LectureScheduler({ activeSession: propsSession, activeSe
                 if (atMax) return editingId != null && Number(editingEntryCourseId) === courseId;
                 return true;
             }
-            const scheduledCount = scheduledCountByCourseGroup.get(key) || 0;
-            const atMaxSlots = scheduledCount >= 2;
-            if (atMaxSlots) return editingId != null && Number(editingEntryCourseId) === courseId;
+            // First/Second: course disappears after total hours >= credit_units (2 or 3)
+            const requiredHours = (c as any).credit_units != null ? Number((c as any).credit_units) : 2;
+            const hours = scheduledHoursByCourseGroup.get(key) || 0;
+            const atMax = hours >= requiredHours;
+            if (atMax) return editingId != null && Number(editingEntryCourseId) === courseId;
             return true;
         });
-    }, [coursesByLevel, class_group_id, scheduledCountByCourseGroup, scheduledHoursByCourseGroup, isPostSiwesSemester, isSummerSemester, course_id, editingId, editingEntryCourseId]);
+    }, [coursesByLevel, class_group_id, scheduledHoursByCourseGroup, isPostSiwesSemester, isSummerSemester, course_id, editingId, editingEntryCourseId]);
 
     // Clear course selection when it's no longer in the list (e.g. just reached 2 slots for this class)
     useEffect(() => {
@@ -703,9 +695,10 @@ export default function LectureScheduler({ activeSession: propsSession, activeSe
     const timetablePublished = activeSemester?.timetable_status === 'published';
     const schedulingDisabled = noActiveSessionOrSemester;
 
-    // Finalize: First/Second = every course scheduled at least once; Summer = 2 hrs per (course, class); Post-SIWES = 6 hrs (checked by canPublishSemester)
+    // Finalize: First/Second = each (course, class) has scheduled hours >= course credit_units; Summer = 2 hrs; Post-SIWES = 6 hrs
     const requiredHoursForSemester = isPostSiwesSemester ? 6 : isSummerSemester ? 2 : null;
     const { allCoursesScheduled, scheduledCount, totalCount, missingCount } = useMemo(() => {
+        // Summer / Post-SIWES: fixed hours per (course, class)
         if (requiredHoursForSemester != null) {
             const requiredPairs = new Set<string>();
             for (const g of classGroups) {
@@ -732,16 +725,32 @@ export default function LectureScheduler({ activeSession: propsSession, activeSe
                 missingCount: total - cleared,
             };
         }
-        const allIds = new Set(allCoursesForSession.map((c) => c.id));
-        const scheduledIds = new Set(timetableEntries.map((e) => e.course_id));
-        const total = allIds.size;
-        const scheduled = [...allIds].filter((id) => scheduledIds.has(id)).length;
-        const missing = total - scheduled;
+        // First/Second: each (course, class) must have scheduled hours >= course credit_units (2 or 3)
+        const requiredPairs = new Set<string>();
+        for (const g of classGroups) {
+            for (const c of allCoursesForSession) {
+                if ((c as any).category === 'GEDS' || (c as any).category === 'SAT') continue;
+                const cDept = (c as any).department ?? '';
+                const gDept = g.department_name ?? g.department ?? '';
+                if (cDept !== gDept) continue;
+                if (g.level != null && (c as any).level != null && String(g.level) !== String((c as any).level)) continue;
+                requiredPairs.add(`${g.id}-${c.id}`);
+            }
+        }
+        let cleared = 0;
+        for (const key of requiredPairs) {
+            const [gId, cId] = key.split('-').map(Number);
+            const hours = scheduledHoursByCourseGroup.get(`${cId}-${gId}`) || 0;
+            const course = allCoursesForSession.find((c) => Number(c.id) === cId);
+            const requiredHrs = (course as any)?.credit_units != null ? Number((course as any).credit_units) : 2;
+            if (hours >= requiredHrs) cleared++;
+        }
+        const total = requiredPairs.size;
         return {
-            allCoursesScheduled: total > 0 && missing === 0,
-            scheduledCount: scheduled,
+            allCoursesScheduled: total > 0 && cleared === total,
+            scheduledCount: cleared,
             totalCount: total,
-            missingCount: missing,
+            missingCount: total - cleared,
         };
     }, [allCoursesForSession, timetableEntries, requiredHoursForSemester, classGroups, scheduledHoursByCourseGroup]);
 
@@ -871,14 +880,13 @@ export default function LectureScheduler({ activeSession: propsSession, activeSe
                                     className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#ffb71b] focus:border-transparent"
                                     required
                                 >
-                                    <option value="">Select Group</option>
+                                    <option value="">Select group</option>
                                     {classGroupsByLevel.map((group) => (
                                         <option key={group.id} value={group.id}>
                                             {group.name}
                                         </option>
                                     ))}
                                 </select>
-                                <p className="text-xs text-slate-500 mt-1">Shows A or B for the class group.</p>
                                 {class_group_id && selectedClass && (
                                     <p className="text-xs text-slate-600 mt-1">Class capacity: {selectedClass.student_count ?? '—'} students</p>
                                 )}
@@ -945,7 +953,7 @@ export default function LectureScheduler({ activeSession: propsSession, activeSe
                                         ? 'Post-SIWES: each course needs 6 hours total per group. It disappears from the list once 6 hours are scheduled.'
                                         : isSummerSemester
                                         ? 'Summer: each course needs 2 hours total per group. It disappears from the list once 2 hours are scheduled.'
-                                        : 'Each course can only be scheduled twice per week for a group. It disappears from the list once scheduled twice.'}
+                                        : 'First/Second: each course needs 2 or 3 hours total per group (by credit units). It disappears from the list once the required hours are scheduled.'}
                                 </p>
                             </div>
                         </div>
@@ -1212,14 +1220,14 @@ export default function LectureScheduler({ activeSession: propsSession, activeSe
                                         ? 'You cannot publish until each course has 6 hours scheduled for every class'
                                         : isSummerSemester
                                         ? 'You cannot publish until each course has 2 hours scheduled for every class'
-                                        : 'You cannot publish until all courses are scheduled for every class'}
+                                        : 'You cannot publish until each course has its required hours (by credit units) scheduled for every class'}
                                 </p>
                                 <p className="text-sm text-amber-700 mt-1">
                                     {isPostSiwesSemester
                                         ? `${scheduledCount} of ${totalCount} class–course combinations have 6 hours scheduled. ${missingCount} still need 6 hours each.`
                                         : isSummerSemester
                                         ? `${scheduledCount} of ${totalCount} class–course combinations have 2 hours scheduled. ${missingCount} still need 2 hours each.`
-                                        : `Clear the course dropdown: every required course must be scheduled for each class group. ${scheduledCount} of ${totalCount} courses scheduled. ${missingCount} course${missingCount !== 1 ? 's' : ''} still need to be scheduled.`}
+                                        : `${scheduledCount} of ${totalCount} class–course combinations have required hours. ${missingCount} still need their required hours (2 or 3 by credit units).`}
                                 </p>
                             </div>
                         )}
@@ -1238,7 +1246,7 @@ export default function LectureScheduler({ activeSession: propsSession, activeSe
                                     ? `You cannot finalize until each course has 6 hours scheduled for every class (${scheduledCount} of ${totalCount} done).`
                                     : isSummerSemester
                                     ? `You cannot finalize until each course has 2 hours scheduled for every class (${scheduledCount} of ${totalCount} done).`
-                                    : `You cannot finalize until all courses are cleared from the dropdown (scheduled for every class) (${scheduledCount} of ${totalCount} done).`}
+                                    : `You cannot finalize until each course has its required hours (2 or 3 by credit units) per class (${scheduledCount} of ${totalCount} done).`}
                             </p>
                         )}
                         <Button
