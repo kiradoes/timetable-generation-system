@@ -6,21 +6,53 @@ import {
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import Api from '../services/api';
+import { DepartmentLevelTimetableView } from './DepartmentLevelTimetableView';
 import { StudentTimetableView } from './StudentTimetableView';
 import { Button } from './ui/button';
 import { Card } from './ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 
+const LANDING_STORAGE_KEY = 'studentLandingState';
+
+function getStoredLandingState() {
+  try {
+    const raw = typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(LANDING_STORAGE_KEY) : null;
+    if (!raw) return null;
+    const o = JSON.parse(raw);
+    const mode = o?.timetableViewMode === 'level' || o?.timetableViewMode === 'department' ? o.timetableViewMode : 'group';
+    return {
+      session: typeof o?.session === 'string' ? o.session : '',
+      semester: typeof o?.semester === 'string' ? o.semester : '',
+      course: typeof o?.course === 'string' ? o.course : '',
+      level: typeof o?.level === 'string' ? o.level : '',
+      group: typeof o?.group === 'string' ? o.group : '',
+      showTimetable: !!o?.showTimetable,
+      timetableViewMode: mode,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function setStoredLandingState(state: { session: string; semester: string; course: string; level: string; group: string; showTimetable: boolean; timetableViewMode: 'group' | 'level' | 'department' }) {
+  try {
+    sessionStorage.setItem(LANDING_STORAGE_KEY, JSON.stringify(state));
+  } catch (_) {}
+}
+
 export function StudentLandingPage({ onOfficerLoginClick }: { onOfficerLoginClick: () => void }) {
-  const [selectedSession, setSelectedSession] = useState('');
+  const stored = getStoredLandingState();
+  const [selectedSession, setSelectedSession] = useState(stored?.session ?? '');
   const [currentSession, setCurrentSession] = useState<string | null>(null);
   const [allSessions, setAllSessions] = useState<{ session_id: number; name: string; start_date: string; end_date: string; status: string; is_current: boolean }[]>([]);
-  const [selectedSemester, setSelectedSemester] = useState('');
-  const [selectedCourse, setSelectedCourse] = useState('');
+  const [allSemesters, setAllSemesters] = useState<{ semester_id: number; name: string; session_id: number; status?: string }[]>([]);
+  const [selectedSemester, setSelectedSemester] = useState(stored?.semester ?? '');
+  const [selectedCourse, setSelectedCourse] = useState(stored?.course ?? '');
   const [departments, setDepartments] = useState<{ department_id: number; name: string }[]>([]);
-  const [selectedLevel, setSelectedLevel] = useState('');
-  const [selectedGroup, setSelectedGroup] = useState('');
-  const [showTimetable, setShowTimetable] = useState(false);
+  const [selectedLevel, setSelectedLevel] = useState(stored?.level ?? '');
+  const [selectedGroup, setSelectedGroup] = useState(stored?.group ?? '');
+  const [showTimetable, setShowTimetable] = useState(stored?.showTimetable ?? false);
+  const [timetableViewMode, setTimetableViewMode] = useState<'group' | 'level' | 'department'>(stored?.timetableViewMode ?? 'group');
   const [resolvedSessionId, setResolvedSessionId] = useState<number | null>(null);
   const [resolvedClassGroupId, setResolvedClassGroupId] = useState<number | null>(null);
   const [resolvingIds, setResolvingIds] = useState(false);
@@ -37,6 +69,35 @@ export function StudentLandingPage({ onOfficerLoginClick }: { onOfficerLoginClic
     setResolvedClassGroupId(null);
   }, [selectedSession, selectedCourse, selectedLevel, selectedGroup]);
 
+  // Fetch semesters for the selected session so the landing page shows all semesters (First, Second, Summer, Post-SIWES, etc.)
+  useEffect(() => {
+    if (!selectedSession) {
+      setAllSemesters([]);
+      setSelectedSemester('');
+      return;
+    }
+    const session = allSessions.find((s) => s.name === selectedSession);
+    const sessionId = session?.session_id;
+    if (!sessionId) {
+      setAllSemesters([]);
+      setSelectedSemester('');
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await Api.getSemestersBySession(sessionId) as { success?: boolean; data?: { semester_id: number; name: string; session_id: number; status?: string }[] };
+        if (cancelled) return;
+        const list = (res?.success && Array.isArray(res?.data)) ? res.data : [];
+        setAllSemesters(list);
+        setSelectedSemester((prev) => (list.length > 0 && list.some((s) => s.name === prev)) ? prev : (list[0]?.name ?? ''));
+      } catch (_) {
+        if (!cancelled) setAllSemesters([]);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [selectedSession, allSessions]);
+
   // Get available groups based on selected level
   const getGroupsForLevel = () => {
     if (!selectedLevel) return [];
@@ -44,7 +105,8 @@ export function StudentLandingPage({ onOfficerLoginClick }: { onOfficerLoginClic
     return ['A', 'B', 'C', 'D', 'E']; // Other levels have 5 groups
   };
 
-  const handleViewTimetable = () => {
+  const handleViewTimetable = (mode: 'group' | 'level' | 'department') => {
+    setTimetableViewMode(mode);
     setShowTimetable(true);
   };
 
@@ -54,6 +116,19 @@ export function StudentLandingPage({ onOfficerLoginClick }: { onOfficerLoginClic
     setResolvedClassGroupId(null);
     setResolvingIds(false);
   };
+
+  // Persist landing form and view so refresh keeps the same page
+  useEffect(() => {
+    setStoredLandingState({
+      session: selectedSession,
+      semester: selectedSemester,
+      course: selectedCourse,
+      level: selectedLevel,
+      group: selectedGroup,
+      showTimetable,
+      timetableViewMode,
+    });
+  }, [selectedSession, selectedSemester, selectedCourse, selectedLevel, selectedGroup, showTimetable, timetableViewMode]);
 
   const formatStatusLabel = (status: string) => {
     if (!status) return 'Inactive';
@@ -107,9 +182,11 @@ export function StudentLandingPage({ onOfficerLoginClick }: { onOfficerLoginClic
     fetchActiveDepartments();
   }, []);
 
-  // Resolve sessionId and classGroupId when viewing timetable (so the timetable matches the class selected)
+  const sessionIdForDeptLevel = allSessions.find((s) => s.name === selectedSession)?.session_id ?? null;
+
+  // Resolve sessionId and classGroupId when viewing group timetable
   useEffect(() => {
-    if (!showTimetable || !selectedSession || !selectedCourse || !selectedLevel || !selectedGroup) {
+    if (!showTimetable || timetableViewMode !== 'group' || !selectedSession || !selectedCourse || !selectedLevel || !selectedGroup) {
       return;
     }
     let cancelled = false;
@@ -157,32 +234,60 @@ export function StudentLandingPage({ onOfficerLoginClick }: { onOfficerLoginClic
       }
     })();
     return () => { cancelled = true; };
-  }, [showTimetable, selectedSession, selectedCourse, selectedLevel, selectedGroup, allSessions]);
+  }, [showTimetable, timetableViewMode, selectedSession, selectedCourse, selectedLevel, selectedGroup, allSessions]);
 
-  // If viewing timetable, show the timetable view (after resolving session and group ids)
+  // If viewing timetable, show the appropriate view
   if (showTimetable) {
-    if (resolvingIds) {
-      return (
-        <div className="min-h-screen bg-slate-50 flex items-center justify-center">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#0f2044] mx-auto mb-4" />
-            <p className="text-slate-600">Loading your timetable...</p>
+    if (timetableViewMode === 'level' || timetableViewMode === 'department') {
+      const sessionId = sessionIdForDeptLevel;
+      if (sessionId != null && selectedSession && selectedSemester && selectedCourse) {
+        return (
+          <DepartmentLevelTimetableView
+            session={selectedSession}
+            semester={selectedSemester}
+            department={selectedCourse}
+            level={timetableViewMode === 'level' ? selectedLevel : undefined}
+            scope={timetableViewMode}
+            onBack={handleBackToSearch}
+            sessionId={sessionId}
+          />
+        );
+      }
+      if (selectedSession && allSessions.length === 0) {
+        return (
+          <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+            <div className="text-center">
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#0f2044] mx-auto mb-4" />
+              <p className="text-slate-600">Loading...</p>
+            </div>
           </div>
-        </div>
+        );
+      }
+    }
+    if (timetableViewMode === 'group') {
+      if (resolvingIds) {
+        return (
+          <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+            <div className="text-center">
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#0f2044] mx-auto mb-4" />
+              <p className="text-slate-600">Loading your timetable...</p>
+            </div>
+          </div>
+        );
+      }
+      return (
+        <StudentTimetableView
+          session={selectedSession}
+          semester={selectedSemester}
+          course={selectedCourse}
+          level={selectedLevel}
+          group={selectedGroup}
+          onBack={handleBackToSearch}
+          sessionId={resolvedSessionId ?? undefined}
+          classGroupId={resolvedClassGroupId ?? undefined}
+        />
       );
     }
-    return (
-      <StudentTimetableView
-        session={selectedSession}
-        semester={selectedSemester}
-        course={selectedCourse}
-        level={selectedLevel}
-        group={selectedGroup}
-        onBack={handleBackToSearch}
-        sessionId={resolvedSessionId ?? undefined}
-        classGroupId={resolvedClassGroupId ?? undefined}
-      />
-    );
   }
 
   return (
@@ -292,13 +397,19 @@ export function StudentLandingPage({ onOfficerLoginClick }: { onOfficerLoginClic
                     <label className="text-sm font-semibold text-[#0f2044]">
                       Semester
                     </label>
-                    <Select value={selectedSemester} onValueChange={setSelectedSemester}>
+                    <Select value={selectedSemester} onValueChange={setSelectedSemester} disabled={allSemesters.length === 0}>
                       <SelectTrigger className="h-12 border-2 border-slate-300 focus:border-[#ffb71b]">
-                        <SelectValue placeholder="Select semester" />
+                        <SelectValue placeholder={allSemesters.length === 0 ? 'Select session first' : 'Select semester'} />
                       </SelectTrigger>
                       <SelectContent className="">
-                        <SelectItem className="" value="1st">1st Semester</SelectItem>
-                        <SelectItem className="" value="2nd">2nd Semester</SelectItem>
+                        {allSemesters.map((sem) => {
+                          const label = sem.name?.trim() ? `${sem.name}${sem.name.toLowerCase().includes('semester') ? '' : ' Semester'}` : 'Semester';
+                          return (
+                            <SelectItem key={sem.semester_id} className="" value={sem.name}>
+                              {label}
+                            </SelectItem>
+                          );
+                        })}
                       </SelectContent>
                     </Select>
                   </div>
@@ -358,14 +469,32 @@ export function StudentLandingPage({ onOfficerLoginClick }: { onOfficerLoginClic
                   </div>
                 </div>
 
-                <Button
-                  onClick={handleViewTimetable}
-                  disabled={!selectedSession || !selectedSemester || !selectedCourse || !selectedLevel || !selectedGroup}
-                  className="w-full h-14 bg-[#0f2044] hover:bg-[#0f2044]/90 text-white font-semibold text-lg"
-                >
-                  <Search className="mr-2 size-5" />
-                  View Timetable
-                </Button>
+                <div className="space-y-3">
+                  <Button
+                    onClick={() => handleViewTimetable('group')}
+                    disabled={!selectedSession || !selectedSemester || !selectedCourse || !selectedLevel || !selectedGroup}
+                    className="w-full h-12 bg-[#0f2044] hover:bg-[#0f2044]/90 text-white font-semibold"
+                  >
+                    <Search className="mr-2 size-5" />
+                    View my timetable (by group)
+                  </Button>
+                  <Button
+                    onClick={() => handleViewTimetable('level')}
+                    disabled={!selectedSession || !selectedSemester || !selectedCourse || !selectedLevel}
+                    variant="outline"
+                    className="w-full h-11 border-2 border-[#0f2044] text-[#0f2044] hover:bg-[#0f2044]/5 font-medium"
+                  >
+                    View level timetable (all groups)
+                  </Button>
+                  <Button
+                    onClick={() => handleViewTimetable('department')}
+                    disabled={!selectedSession || !selectedSemester || !selectedCourse}
+                    variant="outline"
+                    className="w-full h-11 border-2 border-slate-400 text-slate-700 hover:bg-slate-50 font-medium"
+                  >
+                    View department timetable (all levels & groups)
+                  </Button>
+                </div>
               </div>
             </Card>
         </div>

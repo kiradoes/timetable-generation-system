@@ -19,7 +19,7 @@ export function DepartmentCoursesManagement({ departmentName, sessionId }: Depar
     const [editingId, setEditingId] = useState<number | null>(null);
     const [formData, setFormData] = useState({
         course_code: '', title: '', credit_units: 3, level: 100, semester: 'First',
-        category: 'Computing' as 'Computing' | 'Elective' | 'Core',
+        category: 'Core' as 'Core' | 'Elective',
     });
 
     useEffect(() => {
@@ -45,7 +45,7 @@ export function DepartmentCoursesManagement({ departmentName, sessionId }: Depar
         e.preventDefault();
         try {
             const existing = editingId ? courses.find((c: any) => c.course_id === editingId) : null;
-            const data = { ...formData, department: departmentName, session_id: sessionId, category: formData.category || existing?.category || 'Computing' };
+            const data = { ...formData, department: departmentName, session_id: sessionId, category: formData.category || existing?.category || 'Core' };
             const response = editingId
                 ? await api.updateCourse(editingId, data)
                 : await api.createCourse(data);
@@ -62,7 +62,7 @@ export function DepartmentCoursesManagement({ departmentName, sessionId }: Depar
     };
 
     const resetForm = () => {
-        setFormData({ course_code: '', title: '', credit_units: 3, level: 100, semester: 'First', category: 'Computing' });
+        setFormData({ course_code: '', title: '', credit_units: 3, level: 100, semester: 'First', category: 'Core' });
         setEditingId(null); setShowForm(false);
     };
 
@@ -78,7 +78,7 @@ export function DepartmentCoursesManagement({ departmentName, sessionId }: Depar
     };
 
     const handleEdit = (c: any) => {
-        setFormData({ course_code: c.course_code, title: c.title, credit_units: c.credit_units ?? 3, level: c.level ?? 100, semester: c.semester ?? 'First', category: (c.category === 'Elective' ? 'Elective' : c.category === 'Core' ? 'Core' : 'Computing') });
+        setFormData({ course_code: c.course_code, title: c.title, credit_units: c.credit_units ?? 3, level: c.level ?? 100, semester: c.semester ?? 'First', category: (c.category === 'Elective' ? 'Elective' : 'Core') });
         setEditingId(c.course_id);
         setShowForm(true);
     };
@@ -137,8 +137,7 @@ export function DepartmentCoursesManagement({ departmentName, sessionId }: Depar
                                 </div>
                                 <div className="space-y-2">
                                     <Label>Course type</Label>
-                                    <select value={formData.category} onChange={(e) => setFormData({ ...formData, category: e.target.value as 'Computing' | 'Elective' | 'Core' })} className="w-full px-3 py-2 border border-slate-300 rounded-md h-9 focus:outline-none focus:ring-2 focus:ring-[#ffb71b]">
-                                        <option value="Computing">Core / Computing</option>
+                                    <select value={formData.category} onChange={(e) => setFormData({ ...formData, category: e.target.value as 'Core' | 'Elective' })} className="w-full px-3 py-2 border border-slate-300 rounded-md h-9 focus:outline-none focus:ring-2 focus:ring-[#ffb71b]">
                                         <option value="Core">Core</option>
                                         <option value="Elective">Elective (can be scheduled same time as other electives)</option>
                                     </select>

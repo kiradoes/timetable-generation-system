@@ -73,10 +73,12 @@ interface TimetableEntry {
     end_time: string;
     lecturer_name?: string;
     course_code?: string;
+    course_title?: string;
     class_name?: string;
     venue_name?: string;
     group_department?: string;
     group_level?: string | number;
+    semester_id?: number | null;
 }
 
 /** Format class as "400L Group A" from level and group name */
@@ -855,6 +857,31 @@ export default function LectureScheduler({ activeSession: propsSession, activeSe
         if (publishGroupId && !publishGroupOptions.some((x) => x.groupId === publishGroupId)) setPublishGroupId('');
     }, [publishDepartment, publishLevel, publishLevelOptions, publishGroupOptions, completeDepartments]);
 
+    const activeSemesterIdForPublish = activeSemester?.semester_id ?? activeSemester?.id ?? null;
+    // Entries for the selected publish group (and current semester) so the Approve modal shows the right count and course list
+    const entriesForPublishGroup = useMemo(() => {
+        if (!publishGroupId) return [];
+        return timetableEntries.filter((e) => {
+            if (Number(e.class_group_id) !== Number(publishGroupId)) return false;
+            if (activeSemesterIdForPublish == null) return true;
+            return e.semester_id == null || Number(e.semester_id) === Number(activeSemesterIdForPublish);
+        });
+    }, [timetableEntries, publishGroupId, activeSemesterIdForPublish]);
+    const publishGroupCourseList = useMemo(() => {
+        const seen = new Set<number>();
+        const list: { course_code: string; title?: string }[] = [];
+        for (const e of entriesForPublishGroup) {
+            const cid = Number(e.course_id);
+            if (seen.has(cid)) continue;
+            seen.add(cid);
+            list.push({
+                course_code: (e as any).course_code ?? e.course_code ?? '—',
+                title: (e as any).course_title ?? (e as any).course_name
+            });
+        }
+        return list.sort((a, b) => String(a.course_code).localeCompare(String(b.course_code)));
+    }, [entriesForPublishGroup]);
+
     return (
         <div className="space-y-6 p-6">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
@@ -1422,10 +1449,20 @@ export default function LectureScheduler({ activeSession: propsSession, activeSe
                                 : `Publish the timetable for ${sessionSemesterLabel || 'this session'}. Students will see their schedule on the landing page when they select their department, level and group.`}
                         </DialogDescription>
                     </DialogHeader>
-                    <div className="py-2">
+                    <div className="py-2 space-y-3">
                         <p className="text-sm text-slate-700">
-                            <span className="font-medium">{timetableEntries.length}</span> schedule entries will be {timetablePublished ? 'updated and re-' : ''}published. Approve to go live; Reject to stay in the editor.
+                            <span className="font-medium">{entriesForPublishGroup.length}</span> schedule entries for the selected group will be {timetablePublished ? 'updated and re-' : ''}published. Approve to go live; Reject to stay in the editor.
                         </p>
+                        {entriesForPublishGroup.length > 0 && (
+                            <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
+                                <p className="text-xs font-medium text-slate-600 mb-2">Scheduled courses for this group:</p>
+                                <ul className="text-sm text-slate-700 list-disc list-inside space-y-0.5 max-h-40 overflow-y-auto">
+                                    {publishGroupCourseList.map((c, i) => (
+                                        <li key={i}>{c.course_code}{c.title ? ` — ${c.title}` : ''}</li>
+                                    ))}
+                                </ul>
+                            </div>
+                        )}
                     </div>
                     <DialogFooter>
                         <Button
@@ -1446,7 +1483,7 @@ export default function LectureScheduler({ activeSession: propsSession, activeSe
                                 }
                                 setApproving(true);
                                 try {
-                                    const res = await (api as any).updateSemester(semesterId, { timetable_status: 'published' }) as any;
+                                    const res = await (api as any).updateSemester(semesterId, { timetable_status: 'published', publish_group_id: publishGroupId || undefined }) as any;
                                     if (res?.success) {
                                         toast.success(timetablePublished ? 'Timetable re-published. Students will see the update on the landing page.' : 'Timetable published. Students can view their schedule by selecting department, level and group on the landing page.');
                                         onTimetablePublished?.();

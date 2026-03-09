@@ -37,7 +37,7 @@ export function DepartmentCourseManagement({ activeSessionId }: { activeSessionI
     credit_units: 2,
     level: 100,
     semester: 'First' as 'First' | 'Second',
-    category: 'Computing' as 'Computing' | 'Elective' | 'Core'
+    category: 'Core' as 'Core' | 'Elective'
   });
 
   useEffect(() => {
@@ -99,7 +99,7 @@ export function DepartmentCourseManagement({ activeSessionId }: { activeSessionI
       credit_units: 2,
       level: 100,
       semester: 'First',
-      category: 'Computing'
+      category: 'Core'
     });
     setEditingCourse(null);
     setShowForm(false);
@@ -155,7 +155,7 @@ export function DepartmentCourseManagement({ activeSessionId }: { activeSessionI
         credit_units: formData.credit_units,
         level: formData.level,
         semester: formData.semester,
-        category: 'Computing',
+        category: 'Core',
         department: departmentId,
         session_id: activeSessionId
       };
@@ -188,7 +188,7 @@ export function DepartmentCourseManagement({ activeSessionId }: { activeSessionI
       credit_units: course.credit_units,
       level: course.level,
       semester: course.semester === 'Second' ? 'Second' : 'First',
-      category: (course.category === 'Elective' ? 'Elective' : course.category === 'Core' ? 'Core' : 'Computing')
+      category: (course.category === 'Elective' ? 'Elective' : 'Core')
     });
     setShowForm(true);
   };
@@ -317,10 +317,9 @@ export function DepartmentCourseManagement({ activeSessionId }: { activeSessionI
                   <select
                     id="category"
                     value={formData.category}
-                    onChange={(e) => setFormData({ ...formData, category: e.target.value as 'Computing' | 'Elective' | 'Core' })}
+                    onChange={(e) => setFormData({ ...formData, category: e.target.value as 'Core' | 'Elective' })}
                     className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[#ffb71b] bg-white"
                   >
-                    <option value="Computing">Core / Computing</option>
                     <option value="Core">Core</option>
                     <option value="Elective">Elective (can be scheduled same time as other electives)</option>
                   </select>

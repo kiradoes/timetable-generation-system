@@ -616,6 +616,26 @@ export function DepartmentTimetableScheduling({ departmentName, sessionId, activ
         if (publishGroupId && !publishGroupOptions.some((x) => x.groupId === publishGroupId)) setPublishGroupId('');
     }, [publishLevel, publishLevelOptions, publishGroupOptions]);
 
+    const entriesForPublishGroup = useMemo(() => {
+        if (!publishGroupId) return [];
+        return schedulesForSemester.filter((s: any) => Number(s.class_group_id ?? s.group_id) === Number(publishGroupId));
+    }, [schedulesForSemester, publishGroupId]);
+    const publishGroupCourseList = useMemo(() => {
+        const seen = new Set<number>();
+        const list: { course_code: string; name?: string }[] = [];
+        for (const s of entriesForPublishGroup) {
+            const cid = Number(s.course_id);
+            if (seen.has(cid)) continue;
+            seen.add(cid);
+            const code = (s as any).course_code ?? s.course_name ?? '—';
+            list.push({
+                course_code: code,
+                name: s.course_name
+            });
+        }
+        return list.sort((a, b) => String(a.course_code).localeCompare(String(b.course_code)));
+    }, [entriesForPublishGroup]);
+
     return (
         <div className="space-y-6">
             <div className="flex justify-between items-center flex-wrap gap-2">
@@ -1053,10 +1073,20 @@ export function DepartmentTimetableScheduling({ departmentName, sessionId, activ
                                 : `Publish the timetable for ${activeSemester?.name || 'this semester'}. Students will see their schedule on the landing page when they select their department, level and group.`}
                         </DialogDescription>
                     </DialogHeader>
-                    <div className="py-2">
+                    <div className="py-2 space-y-3">
                         <p className="text-sm text-slate-700">
-                            <span className="font-medium">{sortedSchedules.length}</span> schedule entries will be {(activeSemester as any)?.timetable_status === 'published' ? 'updated and re-' : ''}published. Approve to go live; Reject to stay in the editor.
+                            <span className="font-medium">{entriesForPublishGroup.length}</span> schedule entries for the selected group will be {(activeSemester as any)?.timetable_status === 'published' ? 'updated and re-' : ''}published. Approve to go live; Reject to stay in the editor.
                         </p>
+                        {entriesForPublishGroup.length > 0 && (
+                            <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
+                                <p className="text-xs font-medium text-slate-600 mb-2">Scheduled courses for this group:</p>
+                                <ul className="text-sm text-slate-700 list-disc list-inside space-y-0.5 max-h-40 overflow-y-auto">
+                                    {publishGroupCourseList.map((c, i) => (
+                                        <li key={i}>{c.course_code}{c.name ? ` — ${c.name}` : ''}</li>
+                                    ))}
+                                </ul>
+                            </div>
+                        )}
                     </div>
                     <DialogFooter>
                         <Button type="button" variant="outline" onClick={() => setShowApproveModal(false)} disabled={approving}>Reject</Button>
@@ -1070,7 +1100,7 @@ export function DepartmentTimetableScheduling({ departmentName, sessionId, activ
                                 }
                                 setApproving(true);
                                 try {
-                                    const res = await (api as any).updateSemester(semesterId, { timetable_status: 'published' }) as any;
+                                    const res = await (api as any).updateSemester(semesterId, { timetable_status: 'published', publish_group_id: publishGroupId || undefined }) as any;
                                     if (res?.success) {
                                         toast.success((activeSemester as any)?.timetable_status === 'published'
                                             ? 'Timetable re-published. Students will see the update on the landing page.'

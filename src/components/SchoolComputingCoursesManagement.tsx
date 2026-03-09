@@ -21,7 +21,7 @@ export function SchoolComputingCoursesManagement({ sessionId }: SchoolComputingC
     const [editingId, setEditingId] = useState<number | null>(null);
     const [formData, setFormData] = useState({
         course_code: '', title: '', credit_units: 3, level: 100, semester: 'First',
-        category: 'Computing' as 'Computing' | 'Elective' | 'Core',
+        category: 'Core' as 'Core' | 'Elective',
     });
 
     useEffect(() => {
@@ -90,7 +90,7 @@ export function SchoolComputingCoursesManagement({ sessionId }: SchoolComputingC
     };
 
     const resetForm = () => {
-        setFormData({ course_code: '', title: '', credit_units: 3, level: 100, semester: 'First', category: 'Computing' });
+        setFormData({ course_code: '', title: '', credit_units: 3, level: 100, semester: 'First', category: 'Core' });
         setEditingId(null);
         setShowForm(false);
     };
@@ -113,7 +113,7 @@ export function SchoolComputingCoursesManagement({ sessionId }: SchoolComputingC
             credit_units: c.credit_units ?? 3,
             level: c.level ?? 100,
             semester: c.semester ?? 'First',
-            category: (c.category === 'Elective' ? 'Elective' : c.category === 'Core' ? 'Core' : 'Computing'),
+            category: (c.category === 'Elective' ? 'Elective' : 'Core'),
         });
         setEditingId(c.course_id ?? c.id);
         setShowForm(true);
@@ -221,8 +221,7 @@ export function SchoolComputingCoursesManagement({ sessionId }: SchoolComputingC
                                 </div>
                                 <div className="space-y-2">
                                     <Label>Course type</Label>
-                                    <select value={formData.category} onChange={(e) => setFormData({ ...formData, category: e.target.value as 'Computing' | 'Elective' | 'Core' })} className="w-full px-3 py-2 border border-slate-300 rounded-md h-9 focus:outline-none focus:ring-2 focus:ring-[#ffb71b]">
-                                        <option value="Computing">Core / Computing</option>
+                                    <select value={formData.category} onChange={(e) => setFormData({ ...formData, category: e.target.value as 'Core' | 'Elective' })} className="w-full px-3 py-2 border border-slate-300 rounded-md h-9 focus:outline-none focus:ring-2 focus:ring-[#ffb71b]">
                                         <option value="Core">Core</option>
                                         <option value="Elective">Elective</option>
                                     </select>

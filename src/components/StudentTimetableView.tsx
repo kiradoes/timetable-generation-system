@@ -166,8 +166,10 @@ export function StudentTimetableView({
     | { type: 'empty' };
 
   const is12To1Slot = (idx: number) => idx === 5;
+  const is1To2Slot = (idx: number) => idx === 6; // 1-2 PM: always show BREAK (no dash)
 
   const getCellForSlot = (day: string, slotIndex: number): CellInfo => {
+    if (is1To2Slot(slotIndex)) return { type: 'special', label: 'BREAK' };
     const slotTime = STANDARD_TIME_SLOTS[slotIndex];
     const specialLabel = getSpecialEventForSlot(day, slotTime);
     // 12-1 PM: never show break; always show as empty (academic settings: break is 1-2 only).
@@ -475,14 +477,20 @@ export function StudentTimetableView({
               </CardHeader>
               <CardContent className="p-0">
                 <div className="overflow-x-auto">
-                  <table className="w-full border-collapse">
+                  <table className="w-full table-fixed border-collapse">
+                    <colgroup>
+                      <col style={{ width: '9rem' }} />
+                      {TIME_SLOT_HEADERS.map((_, i) => (
+                        <col key={i} style={{ width: `calc((100% - 9rem) / ${TIME_SLOT_HEADERS.length})` }} />
+                      ))}
+                    </colgroup>
                     <thead>
                       <tr className="bg-[#0f2044]">
-                        <th className="border border-slate-300 px-5 py-3 text-left text-white font-semibold min-w-[7.5rem] w-36 sticky left-0 z-10 bg-[#0f2044] text-sm">
+                        <th className="border border-slate-300 px-5 py-3 text-left text-white font-semibold sticky left-0 z-10 bg-[#0f2044] text-sm">
                           Day
                         </th>
                         {TIME_SLOT_HEADERS.map((header, i) => (
-                          <th key={i} className="border border-slate-300 px-2 py-2.5 text-center text-white font-semibold text-xs min-w-[100px]">
+                          <th key={i} className="border border-slate-300 px-2 py-2.5 text-center text-white font-semibold text-xs overflow-hidden text-ellipsis min-w-0" style={{ width: 'calc((100% - 9rem) / 11)' }}>
                             {header}
                           </th>
                         ))}
@@ -512,7 +520,7 @@ export function StudentTimetableView({
                               <td
                                 key={slotIndex}
                                 colSpan={colSpan}
-                                className={`border border-slate-300 align-top ${bgClass}`}
+                                className={`border border-slate-300 align-top min-w-0 overflow-hidden ${bgClass}`}
                                 style={{
                                   minHeight: '4.5rem',
                                   ...(isMultiHour ? { minHeight: `${colSpan * 4.5}rem` } : {}),

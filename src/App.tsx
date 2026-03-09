@@ -8,8 +8,13 @@ import { Toaster } from './components/ui/sonner';
 import { supabase } from './lib/supabase';
 
 export default function App() {
-  // Always open on the landing page when users open the link (do not restore officer-dashboard from storage)
-  const [currentView, setCurrentView] = useState<'student' | 'officer-login' | 'officer-dashboard'>(() => 'student');
+  // On refresh: restore the same page (sessionStorage). New tab: sessionStorage is empty so we show landing.
+  const [currentView, setCurrentView] = useState<'student' | 'officer-login' | 'officer-dashboard'>(() => {
+    const stored = typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('currentView') : null;
+    if (stored === 'officer-dashboard' && localStorage.getItem('userEmail')) return 'officer-dashboard';
+    if (stored === 'officer-login') return 'officer-login';
+    return 'student';
+  });
   const [userEmail, setUserEmail] = useState<string | null>(() => {
     return localStorage.getItem('userEmail') || null;
   });
@@ -38,7 +43,7 @@ export default function App() {
     localStorage.setItem('userEmail', email);
     localStorage.setItem('userRole', role);
     localStorage.setItem('userDepartment', department);
-    localStorage.setItem('currentView', 'officer-dashboard');
+    sessionStorage.setItem('currentView', 'officer-dashboard');
     setUserEmail(email);
     setUserRole(role);
     setUserDepartment(department);
@@ -56,7 +61,7 @@ export default function App() {
     localStorage.removeItem('userEmail');
     localStorage.removeItem('userRole');
     localStorage.removeItem('userDepartment');
-    localStorage.removeItem('currentView');
+    sessionStorage.removeItem('currentView');
     setCurrentView('student');
     setUserEmail(null);
     setUserRole(null);
@@ -65,12 +70,19 @@ export default function App() {
 
   const handleGoToOfficerLogin = () => {
     console.log('handleGoToOfficerLogin called, changing view to officer-login');
+    sessionStorage.setItem('currentView', 'officer-login');
     setCurrentView('officer-login');
   };
 
   const handleBackToStudent = () => {
+    sessionStorage.setItem('currentView', 'student');
     setCurrentView('student');
   };
+
+  // Persist current view on change so refresh keeps the same page
+  useEffect(() => {
+    sessionStorage.setItem('currentView', currentView);
+  }, [currentView]);
 
   return (
     <div className="min-h-screen bg-slate-50">

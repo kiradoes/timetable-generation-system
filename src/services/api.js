@@ -21,7 +21,7 @@ class ApiService {
     if (!isUnique) return null;
     if (msg.includes('departments') && (msg.includes('name') || msg.includes('duplicate'))) return 'A department with this name already exists.';
     if (msg.includes('venues') || msg.includes('venue_id') || msg.includes('venues_name')) return 'A venue with this name already exists.';
-    if (msg.includes('lecturers_name_department_session') || (msg.includes('lecturers') && msg.includes('name'))) return 'A lecturer with this full name already exists in this department.';
+    if (msg.includes('idx_lecturers_name_department_session') || msg.includes('lecturers_name_department_session') || (msg.includes('lecturers') && msg.includes('name'))) return 'A lecturer with this full name already exists in this department and session.';
     if (msg.includes('officers_fullname_department') || (msg.includes('officers') && msg.includes('full_name'))) return 'An officer with this full name already exists in this department.';
     if (msg.includes('lecturer') && msg.includes('slot')) return 'This lecturer is already scheduled at this day and time. Choose another lecturer or time.';
     if (msg.includes('venue') && msg.includes('slot')) return 'This venue is already booked at this day and time. Choose another venue or time.';
@@ -220,7 +220,8 @@ class ApiService {
     };
   }
 
-  /** Write an audit_log entry for schedule (and optionally other tables). Used so STTO dashboard recent activity shows schedule creations. */
+  /** Write an audit_log entry for schedule (and optionally other tables). Used so STTO dashboard recent activity shows schedule creations.
+   * If insert fails (e.g. 403 RLS on audit_log), we do not log to console so the app is not spammed; schedule create/update still succeeds. */
   async _logAudit(tableName, recordId, action, newValues = null, oldValues = null) {
     try {
       const userRes = await this.getCurrentUser();
@@ -233,10 +234,12 @@ class ApiService {
         old_values: oldValues || null,
         changed_by: officerId,
       }]);
-      if (error) console.warn('Audit log insert failed:', error.message);
-    } catch (e) {
-      console.warn('Audit log failed:', e?.message || e);
-    }
+      if (error) {
+        const errMsg = String(error.message || '');
+        if (error.code === '42501' || errMsg.includes('row-level security') || errMsg.includes('policy') || errMsg.includes('violates row-level security')) return;
+        console.warn('Audit log insert failed:', error.message);
+      }
+    } catch (_) {}
   }
 
   /** Human-readable action label from audit_log row */
@@ -1040,9 +1043,11 @@ class ApiService {
    * - First/Second: every class group must have all required courses scheduled at least once.
    * - Summer: every required (group, course) must have at least 2 hours scheduled total.
    * - Post-SIWES: every required (group, course) must have at least 6 hours scheduled total.
+   * When options.publish_group_id is set, only that group is validated (so you can publish one complete group at a time).
    * Returns { success, canPublish, message, missing }.
    */
-  async canPublishSemester(semesterId) {
+  async canPublishSemester(semesterId, options = {}) {
+    const publishGroupId = options.publish_group_id != null ? Number(options.publish_group_id) : null;
     const { data: semester } = await supabase.from('semesters').select('session_id, name').eq('semester_id', semesterId).maybeSingle();
     if (!semester?.session_id) return this.handleResponse(null, { message: 'Semester not found.' });
     const sessionId = semester.session_id;
@@ -1050,7 +1055,12 @@ class ApiService {
     const isPostSiwes = semesterName.includes('post-siwes') || semesterName === 'post siwes';
     const isSummer = semesterName === 'summer' || semesterName.includes('summer');
 
-    const { data: groups } = await supabase.from('class_groups').select('group_id, department, level').eq('session_id', sessionId).eq('status', 'active');
+    const { data: groupsRaw } = await supabase.from('class_groups').select('group_id, department, level, name').eq('session_id', sessionId).eq('status', 'active');
+    let groups = groupsRaw || [];
+    if (publishGroupId != null) {
+      groups = groups.filter((g) => Number(g.group_id) === publishGroupId);
+      if (groups.length === 0) return this.handleResponse(null, { message: 'Selected group not found or inactive.' });
+    }
     const { data: courses } = await supabase.from('courses').select('course_id, course_code, title, department, level, category, credit_units').eq('session_id', sessionId).eq('status', 'active');
 
     const checkHoursSemester = async (requiredHours) => {
@@ -1071,7 +1081,7 @@ class ApiService {
         hoursByKey.set(key, (hoursByKey.get(key) || 0) + mins);
       }
       const missing = [];
-      for (const g of groups || []) {
+      for (const g of groups) {
         const dept = g.department || '';
         const lvl = g.level != null ? Number(g.level) : null;
         for (const c of courses || []) {
@@ -1081,8 +1091,9 @@ class ApiService {
           const key = `${g.group_id}-${c.course_id}`;
           const totalMins = hoursByKey.get(key) || 0;
           if (totalMins < requiredHours * 60) {
+            const groupLabel = g.name ? `${g.level}L ${g.department} Group ${g.name}` : `${g.level}L ${g.department}`;
             missing.push({
-              group: `${g.level}L ${g.department}`,
+              group: groupLabel,
               course: c.course_code || c.title || 'Course',
               hoursScheduled: Math.round(totalMins / 60),
               required: requiredHours,
@@ -1139,7 +1150,7 @@ class ApiService {
       hoursByKey.set(key, (hoursByKey.get(key) || 0) + mins);
     }
     const missing = [];
-    for (const g of groups || []) {
+    for (const g of groups) {
       const dept = g.department || '';
       const lvl = g.level != null ? Number(g.level) : null;
       for (const c of courses || []) {
@@ -1151,8 +1162,9 @@ class ApiService {
         const requiredMins = requiredHrs * 60;
         const totalMins = hoursByKey.get(key) || 0;
         if (totalMins < requiredMins) {
+          const groupLabel = g.name ? `${g.level}L ${g.department} Group ${g.name}` : `${g.level}L ${g.department}`;
           missing.push({
-            group: `${g.level}L ${g.department}`,
+            group: groupLabel,
             course: c.course_code || c.title || 'Course',
             hoursScheduled: Math.round(totalMins / 60),
             required: requiredHrs,
@@ -1179,12 +1191,13 @@ class ApiService {
       }
     }
     if (data.timetable_status === 'published') {
-      const check = await this.canPublishSemester(id);
+      const check = await this.canPublishSemester(id, { publish_group_id: data.publish_group_id });
       if (check.success && check.data && !check.data.canPublish) {
         return this.handleResponse(null, { message: check.data.message || 'Schedule all courses before publishing.' });
       }
     }
-    const { data: res, error } = await supabase.from('semesters').update(data).eq('semester_id', id).select().single();
+    const { publish_group_id: _publishGroupId, ...updatePayload } = data;
+    const { data: res, error } = await supabase.from('semesters').update(updatePayload).eq('semester_id', id).select().single();
     return this.handleResponse(res, error);
   }
 
@@ -2216,6 +2229,24 @@ class ApiService {
       });
     }
     return this.handleResponse(merged, null);
+  }
+
+  /**
+   * Get all published timetable entries for a department (all levels and groups).
+   * Used for landing page "View department timetable" and "View level timetable" (filter by level on client).
+   */
+  async getPublicTimetableByDepartment(sessionId, departmentName) {
+    if (!sessionId || !departmentName) return this.handleResponse(null, { message: 'sessionId and departmentName required' });
+    const semRes = await this.getSemestersBySession(sessionId);
+    const semesters = (semRes.success && Array.isArray(semRes.data)) ? semRes.data : [];
+    const hasPublished = semesters.some((s) => s.timetable_status === 'published');
+    if (!hasPublished) {
+      return { success: true, data: [], published: false };
+    }
+    const scheduleRes = await this.getSchedulesWithDetails({ session_id: sessionId, department: departmentName });
+    if (!scheduleRes.success) return scheduleRes;
+    const list = Array.isArray(scheduleRes.data) ? scheduleRes.data : [];
+    return this.handleResponse(list, null);
   }
 }
 
