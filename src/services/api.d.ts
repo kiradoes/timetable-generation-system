@@ -34,6 +34,9 @@ export class ApiService {
     createClassGroup(data: any): Promise<ApiResponse<any>>;
     updateClassGroup(id: number, data: any): Promise<ApiResponse<any>>;
     deleteClassGroup(id: number): Promise<ApiResponse<any>>;
+    getClassCourseMappings(sessionId: number, opts?: { department?: string; level?: number | string }): Promise<ApiResponse<any>>;
+    setClassCourseMappings(sessionId: number, department: string, level: number | string, courseIds: number[]): Promise<ApiResponse<any>>;
+    getCourseIdsForClass(sessionId: number, department: string, level: number | string): Promise<number[] | null>;
     getDepartments(params?: any): Promise<ApiResponse<any>>;
     createDepartment(data: any): Promise<ApiResponse<any>>;
     updateDepartment(id: number, data: any): Promise<ApiResponse<any>>;
@@ -58,6 +61,7 @@ export class ApiService {
     getSchedulesByTimetable(timetableId: number): Promise<ApiResponse<any>>;
     checkVenueConflict(sessionId: number, venueId: number, day: string, startTime: string, endTime: string, excludeScheduleId?: number | null): Promise<{ success: boolean; conflict?: boolean; message?: string }>;
     checkClassGroupTimeConflict(sessionId: number, groupId: number, day: string, startTime: string, endTime: string, excludeScheduleId?: number | null, courseId?: number | null): Promise<{ success: boolean; conflict?: boolean; message?: string }>;
+    checkClassDayLimits(sessionId: number, groupId: number, day: string, startTime: string, endTime: string, excludeScheduleId?: number | null, semesterId?: number | null): Promise<{ success: boolean; conflict?: boolean; message?: string }>;
     checkCourseHoursForGroup(sessionId: number, courseId: number, classGroupId: number, durationHours: number, excludeScheduleId?: number | null, semesterId?: number | null): Promise<{ success: boolean; overLimit?: boolean; message?: string }>;
     checkSpecialEventConflict(sessionId: number, day: string, startTime: string, endTime: string, classGroupLevel: number | string | null): Promise<{ success: boolean; conflict?: boolean; message?: string }>;
     createSchedule(data: any): Promise<ApiResponse<any>>;

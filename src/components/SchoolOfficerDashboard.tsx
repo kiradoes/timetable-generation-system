@@ -6,6 +6,7 @@ import {
   Clock,
   GraduationCap,
   LayoutGrid,
+  Link2,
   MapPin,
   Settings,
   UserPlus,
@@ -24,6 +25,7 @@ import { SchoolComputingCoursesManagement } from './SchoolComputingCoursesManage
 import { SchoolLecturerPreferences } from './SchoolLecturerPreferences';
 import { SpecialEventsPanel } from './SpecialEventsPanel';
 import { VenueManagement } from './VenueManagement';
+import { ClassToCourseManagement } from './ClassToCourseManagement';
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
@@ -104,6 +106,7 @@ export function SchoolOfficerDashboard({ userEmail, onLogout }: { userEmail: str
     { name: 'Officer Management', icon: UserPlus, active: activeView === 'officer-management', onClick: () => setActiveView('officer-management'), description: 'Add/Remove Department Timetable Officers' },
     { name: 'Class Management', icon: LayoutGrid, active: activeView === 'class-management', onClick: () => setActiveView('class-management'), description: 'Manage class groups by department (same layout as DTTO)' },
     { name: 'Course Management', icon: BookOpen, active: activeView === 'computing-courses-management', onClick: () => setActiveView('computing-courses-management'), description: 'Computing courses by department with search' },
+    { name: 'Class to Course Management', icon: Link2, active: activeView === 'class-to-course', onClick: () => setActiveView('class-to-course'), description: 'Manage which classes are linked to which courses' },
     { name: 'Non-Computing Courses Management', icon: BookOpen, active: activeView === 'courses-management', onClick: () => setActiveView('courses-management'), description: 'External courses: Course code, title, lecturer, class/group, day, time' },
     { name: 'Lecturer Preferences', icon: Users, active: activeView === 'lecturer-preferences', onClick: () => setActiveView('lecturer-preferences'), description: 'Logic engine: Add lecturer (name, department), set unavailable days/times' },
     { name: 'Venue Management', icon: MapPin, active: activeView === 'venue-management', onClick: () => setActiveView('venue-management'), description: 'Add and manage venues (lecture halls, labs) for scheduling' },
@@ -124,6 +127,8 @@ export function SchoolOfficerDashboard({ userEmail, onLogout }: { userEmail: str
         return <SchoolClassGroupsManagement sessionId={activeSession?.session_id ?? activeSession?.id ?? null} />;
       case 'computing-courses-management':
         return <SchoolComputingCoursesManagement sessionId={activeSession?.session_id ?? activeSession?.id ?? null} />;
+      case 'class-to-course':
+        return <ClassToCourseManagement sessionId={activeSession?.session_id ?? activeSession?.id ?? null} role="school-officer" />;
       case 'courses-management':
         return <NonComputingCourseManagement />;
       case 'lecturer-preferences':
@@ -158,6 +163,7 @@ function OverviewView({ activeSession, activeSemester, onNavigate }: {
   onNavigate: (view: string) => void;
 }) {
   const [recentActivities, setRecentActivities] = useState<{ full_name: string; department: string; description: string }[]>([]);
+  const [downloadingCoverage, setDownloadingCoverage] = useState(false);
 
   useEffect(() => {
     const fetchDashboardData = async () => {
@@ -173,6 +179,54 @@ function OverviewView({ activeSession, activeSemester, onNavigate }: {
 
     fetchDashboardData();
   }, []);
+
+  const handleDownloadCoverageReport = async () => {
+    if (!activeSemester?.semester_id && !activeSemester?.id) {
+      alert('No active semester selected.');
+      return;
+    }
+    const semesterId = activeSemester.semester_id ?? activeSemester.id;
+    setDownloadingCoverage(true);
+    try {
+      const res = await api.canPublishSemester(semesterId);
+      if (!res.success || !res.data) {
+        alert(res.error || 'Unable to generate coverage report.');
+        return;
+      }
+      const missing = Array.isArray(res.data.missing) ? res.data.missing : [];
+      if (missing.length === 0) {
+        alert('All required courses have the required hours scheduled for every class. No missing entries to report.');
+        return;
+      }
+      const rows = [
+        ['Group', 'Course', 'Hours Scheduled', 'Required Hours'],
+        ...missing.map((m: any) => [
+          m.group || '',
+          m.course || '',
+          String(m.hoursScheduled ?? 0),
+          String(m.required ?? ''),
+        ]),
+      ];
+      const csv = rows
+        .map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(','))
+        .join('\r\n');
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const semLabel = activeSemester?.name ? String(activeSemester.name).replace(/\s+/g, '_') : 'semester';
+      a.download = `coverage_report_all_departments_${semLabel}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Failed to download coverage report:', err);
+      alert('Failed to generate coverage report.');
+    } finally {
+      setDownloadingCoverage(false);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -200,6 +254,14 @@ function OverviewView({ activeSession, activeSemester, onNavigate }: {
               <Clock className="size-5 text-[#ffb71b]" />
               Quick Actions
             </span>
+            <Button
+              variant="outline"
+              className="border-[#0f2044] text-[#0f2044] hover:bg-[#0f2044]/5 text-xs sm:text-sm"
+              onClick={handleDownloadCoverageReport}
+              disabled={downloadingCoverage}
+            >
+              {downloadingCoverage ? 'Preparing Coverage Report…' : 'Download Coverage Report'}
+            </Button>
           </CardTitle>
         </CardHeader>
         <CardContent>

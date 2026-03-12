@@ -394,9 +394,8 @@ export function DepartmentLevelTimetableView({
         {!notPublished && sections.length > 0 && (
           <Card className="mb-6 shadow-lg border-t-4 border-t-[#ffb71b]">
             <CardHeader className="bg-gradient-to-r from-[#0f2044] to-[#1a3a6b]">
-              <CardTitle className="text-white">
-                {scope === 'department' ? 'Department Timetable Details' : 'Level Timetable Details'}
-              </CardTitle>
+              <CardTitle className="text-white">Summary</CardTitle>
+              <p className="text-slate-300 text-sm mt-1">View your schedule below; you can download it as PDF.</p>
             </CardHeader>
             <CardContent className="pt-6">
               <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
@@ -419,22 +418,22 @@ export function DepartmentLevelTimetableView({
                   </div>
                 )}
               </div>
+              <div className="flex flex-wrap justify-end gap-3 mt-6 pt-4 border-t border-slate-200">
+                <Button
+                  onClick={handleDownloadPDF}
+                  disabled={isExporting || sections.length === 0}
+                  className="bg-[#0f2044] hover:bg-[#0f2044]/90 text-white"
+                >
+                  {isExporting ? (
+                    <span className="flex items-center gap-2"><span className="animate-spin size-4 border-2 border-white border-t-transparent rounded-full" /> Generating...</span>
+                  ) : (
+                    <><Download className="mr-2 size-4" /> Download as PDF</>
+                  )}
+                </Button>
+              </div>
             </CardContent>
           </Card>
         )}
-        <div className="flex justify-end gap-3 mb-6">
-          <Button
-            onClick={handleDownloadPDF}
-            disabled={isExporting || sections.length === 0}
-            className="bg-[#0f2044] hover:bg-[#0f2044]/90 text-white"
-          >
-            {isExporting ? (
-              <span className="flex items-center gap-2"><span className="animate-spin size-4 border-2 border-white border-t-transparent rounded-full" /> Generating...</span>
-            ) : (
-              <><Download className="mr-2 size-4" /> Download PDF</>
-            )}
-          </Button>
-        </div>
 
         {notPublished ? (
           <Card className="border-amber-200 bg-amber-50">
