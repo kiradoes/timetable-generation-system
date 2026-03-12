@@ -266,7 +266,7 @@ export function DepartmentTimetableScheduling({ departmentName, sessionId, activ
         const semesterId = activeSemester?.semester_id ?? undefined;
         const hoursRes = await api.checkCourseHoursForGroup(sessionId!, parseInt(formData.course_id), parseInt(formData.class_group_id), durationHours, editingId ?? undefined, semesterId);
         if (hoursRes?.overLimit) {
-            toast.error(hoursRes.message || 'This course can only be scheduled twice per week for this class group.');
+            toast.error(hoursRes.message || 'This course can only be scheduled twice per week for this class.');
             return;
         }
 
@@ -715,7 +715,7 @@ export function DepartmentTimetableScheduling({ departmentName, sessionId, activ
                     </CardHeader>
                     <CardContent>
                         <form onSubmit={handleSubmit} className="space-y-4">
-                            {/* Level and Class Group first — level and groups come from Class Management */}
+                            {/* Level and Class first — level and classes come from Class Management */}
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
                                     <Label htmlFor="level">Level *</Label>
@@ -731,10 +731,10 @@ export function DepartmentTimetableScheduling({ departmentName, sessionId, activ
                                             <option key={lv} value={lv}>{lv}</option>
                                         ))}
                                     </select>
-                                    <p className="text-xs text-slate-500 mt-1">Levels and groups are set in Class Management.</p>
+                                    <p className="text-xs text-slate-500 mt-1">Levels and classes are set in Class Management.</p>
                                 </div>
                                 <div>
-                                    <Label htmlFor="group">Class Group *</Label>
+                                    <Label htmlFor="group">Class *</Label>
                                     <select
                                         id="group"
                                         value={formData.class_group_id}
@@ -743,7 +743,7 @@ export function DepartmentTimetableScheduling({ departmentName, sessionId, activ
                                         required
                                         disabled={!formData.level}
                                     >
-                                        <option value="">{formData.level ? 'Select group' : 'Select level first'}</option>
+                                        <option value="">{formData.level ? 'Select class' : 'Select level first'}</option>
                                         {groupsByLevel.map((g: any) => (
                                             <option key={g.group_id} value={g.group_id}>{g.name}</option>
                                         ))}
@@ -1037,7 +1037,7 @@ export function DepartmentTimetableScheduling({ departmentName, sessionId, activ
                     </CardHeader>
                     <CardContent className="p-6 space-y-4">
                         <p className="text-sm text-slate-600">
-                            Select the level and group you intend to publish the timetable for. Only completed schedules (no pending course) appear below.
+                            Select the level and class you intend to publish the timetable for. Only completed schedules (no pending course) appear below.
                         </p>
                         {completeGroupsList.length === 0 ? (
                             <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg">
@@ -1071,7 +1071,7 @@ export function DepartmentTimetableScheduling({ departmentName, sessionId, activ
                                         className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[#ffb71b]"
                                         disabled={!publishLevel}
                                     >
-                                        <option value="">Select group</option>
+                                        <option value="">Select class</option>
                                         {publishGroupOptions.map((g) => (
                                             <option key={g.groupId} value={g.groupId}>{g.groupName}</option>
                                         ))}
@@ -1102,7 +1102,7 @@ export function DepartmentTimetableScheduling({ departmentName, sessionId, activ
                         <DialogDescription>
                             {(activeSemester as any)?.timetable_status === 'published'
                                 ? `Re-publish the timetable for ${activeSemester?.name || 'this semester'} so the student landing page shows your latest changes.`
-                                : `Publish the timetable for ${activeSemester?.name || 'this semester'}. Students will see their schedule on the landing page when they select their department, level and group.`}
+                                : `Publish the timetable for ${activeSemester?.name || 'this semester'}. Students will see their schedule on the landing page when they select their department, level and class.`}
                         </DialogDescription>
                     </DialogHeader>
                     <div className="py-2 space-y-3">
@@ -1136,7 +1136,7 @@ export function DepartmentTimetableScheduling({ departmentName, sessionId, activ
                                     if (res?.success) {
                                         toast.success((activeSemester as any)?.timetable_status === 'published'
                                             ? 'Timetable re-published. Students will see the update on the landing page.'
-                                            : 'Timetable published. Students can view their schedule by selecting department, level and group on the landing page.');
+                                            : 'Timetable published. Students can view their schedule by selecting department, level and class on the landing page.');
                                         setShowApproveModal(false);
                                         setSelectedSemester((prev: any) => prev ? { ...prev, timetable_status: 'published' } : null);
                                     } else {

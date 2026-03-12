@@ -196,7 +196,7 @@ export function DepartmentLevelTimetableView({
         courseCode: r.course_code || r.course_name || '—',
         venue: r.venue_name || '—',
         lecturer: r.lecturer_name || '—',
-        groupName: r.group_name ?? `Group ${r.class_group_id ?? ''}`,
+        groupName: r.group_name ?? `Class ${r.class_group_id ?? ''}`,
         level: String(r.group_level ?? ''),
       })).filter((r) => r.day);
       if (departmentTimetableData.length === 0) return [];
@@ -210,7 +210,7 @@ export function DepartmentLevelTimetableView({
         courseCode: r.course_code || r.course_name || '—',
         venue: r.venue_name || '—',
         lecturer: r.lecturer_name || '—',
-        groupName: r.group_name ?? `Group ${r.class_group_id ?? ''}`,
+        groupName: r.group_name ?? `Class ${r.class_group_id ?? ''}`,
       })).filter((r) => r.day);
       if (levelTimetableData.length === 0) return [];
       return [{ level: String(level), groupName: 'All Groups', timetableData: levelTimetableData, combined: true as const }];

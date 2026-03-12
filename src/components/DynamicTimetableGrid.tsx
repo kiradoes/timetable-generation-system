@@ -460,7 +460,7 @@ function AddClassModal({ isOpen, onClose, onSave, selectedSlot }: AddClassModalP
 
             <div className="space-y-2">
               <Label htmlFor="group" className="text-[#0f2044] font-semibold">
-                Group <span className="text-red-500">*</span>
+                Class <span className="text-red-500">*</span>
               </Label>
               <select
                 id="group"
@@ -469,10 +469,10 @@ function AddClassModal({ isOpen, onClose, onSave, selectedSlot }: AddClassModalP
                 required
                 className="w-full h-10 px-3 rounded-md border border-slate-300 focus:border-[#ffb71b] focus:ring-1 focus:ring-[#ffb71b] bg-white"
               >
-                <option value="">Select group</option>
-                <option value="Group A">Group A</option>
-                <option value="Group B">Group B</option>
-                <option value="Group C">Group C</option>
+                <option value="">Select class</option>
+                <option value="Group A">Class A</option>
+                <option value="Group B">Class B</option>
+                <option value="Group C">Class C</option>
               </select>
             </div>
           </div>

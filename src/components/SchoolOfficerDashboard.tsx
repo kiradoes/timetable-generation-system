@@ -104,7 +104,7 @@ export function SchoolOfficerDashboard({ userEmail, onLogout }: { userEmail: str
     { name: 'Academic Settings', icon: Settings, active: activeView === 'academic-settings', onClick: () => setActiveView('academic-settings'), description: 'Manage sessions and semesters' },
     { name: 'Department Management', icon: Building2, active: activeView === 'department-management', onClick: () => setActiveView('department-management'), description: 'Manage departments (active/inactive)' },
     { name: 'Officer Management', icon: UserPlus, active: activeView === 'officer-management', onClick: () => setActiveView('officer-management'), description: 'Add/Remove Department Timetable Officers' },
-    { name: 'Class Management', icon: LayoutGrid, active: activeView === 'class-management', onClick: () => setActiveView('class-management'), description: 'Manage class groups by department (same layout as DTTO)' },
+    { name: 'Class Management', icon: LayoutGrid, active: activeView === 'class-management', onClick: () => setActiveView('class-management'), description: 'Manage classes by department (same layout as DTTO)' },
     { name: 'Course Management', icon: BookOpen, active: activeView === 'computing-courses-management', onClick: () => setActiveView('computing-courses-management'), description: 'Computing courses by department with search' },
     { name: 'Class to Course Management', icon: Link2, active: activeView === 'class-to-course', onClick: () => setActiveView('class-to-course'), description: 'Manage which classes are linked to which courses' },
     { name: 'Non-Computing Courses Management', icon: BookOpen, active: activeView === 'courses-management', onClick: () => setActiveView('courses-management'), description: 'External courses: Course code, title, lecturer, class/group, day, time' },
@@ -168,7 +168,7 @@ function OverviewView({ activeSession, activeSemester, onNavigate }: {
   useEffect(() => {
     const fetchDashboardData = async () => {
       try {
-        const activitiesRes = await api.getRecentOfficerActivities(15);
+        const activitiesRes = await api.getRecentOfficerActivities(15, { departmentOfficersOnly: true });
         if (activitiesRes.success && Array.isArray(activitiesRes.data)) {
           setRecentActivities(activitiesRes.data);
         }
@@ -190,7 +190,7 @@ function OverviewView({ activeSession, activeSemester, onNavigate }: {
     try {
       const res = await api.canPublishSemester(semesterId);
       if (!res.success || !res.data) {
-        alert(res.error || 'Unable to generate coverage report.');
+        alert(res.error || 'Unable to generate summary report.');
         return;
       }
       const missing = Array.isArray(res.data.missing) ? res.data.missing : [];
@@ -215,14 +215,14 @@ function OverviewView({ activeSession, activeSemester, onNavigate }: {
       const a = document.createElement('a');
       a.href = url;
       const semLabel = activeSemester?.name ? String(activeSemester.name).replace(/\s+/g, '_') : 'semester';
-      a.download = `coverage_report_all_departments_${semLabel}.csv`;
+      a.download = `summary_report_all_departments_${semLabel}.csv`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
     } catch (err) {
       console.error('Failed to download coverage report:', err);
-      alert('Failed to generate coverage report.');
+      alert('Failed to generate summary report.');
     } finally {
       setDownloadingCoverage(false);
     }
@@ -260,7 +260,7 @@ function OverviewView({ activeSession, activeSemester, onNavigate }: {
               onClick={handleDownloadCoverageReport}
               disabled={downloadingCoverage}
             >
-              {downloadingCoverage ? 'Preparing Coverage Report…' : 'Download Coverage Report'}
+              {downloadingCoverage ? 'Preparing Summary Report…' : 'Download Summary Report'}
             </Button>
           </CardTitle>
         </CardHeader>

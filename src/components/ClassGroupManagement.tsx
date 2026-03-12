@@ -260,7 +260,7 @@ export function ClassGroupManagement({ activeSessionId }: { activeSessionId: num
                   </select>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="name">Group *</Label>
+                  <Label htmlFor="name">Class *</Label>
                   <select
                     id="name"
                     value={formData.name}
@@ -291,7 +291,7 @@ export function ClassGroupManagement({ activeSessionId }: { activeSessionId: num
 
               <div className="flex gap-2">
                 <Button type="submit" disabled={isLoading} className="bg-[#0f2044] hover:bg-[#0f2044]/90 text-white">
-                  {editingGroup ? 'Update' : 'Add'} Class Group
+                  {editingGroup ? 'Update' : 'Add'} Class
                 </Button>
                 <Button type="button" variant="outline" onClick={resetForm} disabled={isLoading}>
                   Cancel

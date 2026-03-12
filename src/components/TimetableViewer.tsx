@@ -239,17 +239,17 @@ export function TimetableViewer({ userRole, department, activeSessionId }) {
                     </Select>
                   </div>
                   <div className="space-y-2">
-                    <Label>Group</Label>
+                    <Label>Class</Label>
                     <Select value={selectedGroup} onValueChange={setSelectedGroup}>
                       <SelectTrigger>
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="A">Group A</SelectItem>
-                        <SelectItem value="B">Group B</SelectItem>
-                        <SelectItem value="C">Group C</SelectItem>
-                        <SelectItem value="D">Group D</SelectItem>
-                        <SelectItem value="E">Group E</SelectItem>
+                        <SelectItem value="A">Class A</SelectItem>
+                        <SelectItem value="B">Class B</SelectItem>
+                        <SelectItem value="C">Class C</SelectItem>
+                        <SelectItem value="D">Class D</SelectItem>
+                        <SelectItem value="E">Class E</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>

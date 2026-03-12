@@ -38,7 +38,7 @@ export function MissingCoursesPanel({
             {missingCourses.length > 0 ? (
               <>
                 <AlertCircle className="size-5 text-orange-600" />
-                <span className="text-orange-900">Course Coverage Analysis</span>
+                <span className="text-orange-900">Summary Report</span>
               </>
             ) : (
               <>

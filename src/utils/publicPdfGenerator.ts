@@ -26,7 +26,7 @@ export function generatePublicTimetablePDF(
   doc.setFontSize(11);
   const semesterText = filters.semester === 'first' ? 'First Semester' : 'Second Semester';
   doc.text(`Course: ${filters.course.toUpperCase()}`, 20, 45);
-  doc.text(`Level: ${filters.level} - Group ${filters.group}`, 20, 52);
+  doc.text(`Level: ${filters.level} - Class ${filters.group}`, 20, 52);
   doc.text(`Session: ${filters.session}`, 120, 45);
   doc.text(`Semester: ${semesterText}`, 120, 52);
   doc.text(`Generated: ${new Date().toLocaleDateString()}`, 20, 59);

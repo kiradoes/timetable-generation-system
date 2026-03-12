@@ -149,7 +149,7 @@ export function SchoolClassGroupsManagement({ sessionId }: SchoolClassGroupsMana
                         <Users className="size-5 text-[#ffb71b]" />
                         Class Management
                     </h3>
-                    <p className="text-sm text-slate-600">Manage class groups by department. Select a department to add or edit classes (level, group name, class size). Same layout as Department Timetable Officer; data is separated by department.</p>
+                    <p className="text-sm text-slate-600">Manage classes by department. Select a department to add or edit classes (level, class name, class size). Same layout as Department Timetable Officer; data is separated by department.</p>
                 </div>
 
                 <div className="flex flex-wrap items-center gap-3">
@@ -220,7 +220,7 @@ export function SchoolClassGroupsManagement({ sessionId }: SchoolClassGroupsMana
                                     </select>
                                 </div>
                                 <div className="space-y-2">
-                                    <Label>Group *</Label>
+                                    <Label>Class *</Label>
                                     <select
                                         value={formData.name}
                                         onChange={(e) => setFormData({ ...formData, name: e.target.value })}
@@ -247,7 +247,7 @@ export function SchoolClassGroupsManagement({ sessionId }: SchoolClassGroupsMana
                             </div>
                             <div className="flex gap-2">
                                 <Button type="submit" className="bg-[#0f2044] hover:bg-[#0f2044]/90 text-white">
-                                    {editingId ? 'Update' : 'Add'} Class Group
+                                    {editingId ? 'Update' : 'Add'} Class
                                 </Button>
                                 <Button type="button" variant="outline" onClick={resetForm}>Cancel</Button>
                             </div>
@@ -259,7 +259,7 @@ export function SchoolClassGroupsManagement({ sessionId }: SchoolClassGroupsMana
             {!department && (
                 <Card className="border border-dashed border-slate-300">
                     <CardContent className="py-8 text-center text-slate-500">
-                        Select a department to view and manage class groups.
+                        Select a department to view and manage classes.
                     </CardContent>
                 </Card>
             )}
@@ -271,7 +271,7 @@ export function SchoolClassGroupsManagement({ sessionId }: SchoolClassGroupsMana
             {department && !loading && groups.length === 0 && (
                 <Card className="border border-dashed border-slate-300">
                     <CardContent className="py-8 text-center text-slate-500">
-                        No class groups yet for this department. Add level, group, and class size to use in Schedule Lecture.
+                        No classes yet for this department. Add level, class name, and class size to use in Schedule Lecture.
                     </CardContent>
                 </Card>
             )}
@@ -283,7 +283,7 @@ export function SchoolClassGroupsManagement({ sessionId }: SchoolClassGroupsMana
                             <thead>
                                 <tr className="border-b bg-slate-100 text-left">
                                     <th className="p-3 font-semibold text-[#0f2044]">Level</th>
-                                    <th className="p-3 font-semibold text-[#0f2044]">Group</th>
+                                    <th className="p-3 font-semibold text-[#0f2044]">Class</th>
                                     <th className="p-3 font-semibold text-[#0f2044]">Class Size</th>
                                     <th className="p-3 font-semibold text-[#0f2044] text-right">Actions</th>
                                 </tr>

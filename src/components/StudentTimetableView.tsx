@@ -263,7 +263,7 @@ export function StudentTimetableView({
       doc.setTextColor(15, 32, 68);
       doc.setFontSize(10);
       const detailsY = 26;
-      doc.text(`${session}  |  ${semester}  |  ${getCourseName(course)}  |  Level ${level}  |  Group ${group}  |  ${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}`, pageW / 2, detailsY, { align: 'center' });
+      doc.text(`${session}  |  ${semester}  |  ${getCourseName(course)}  |  Level ${level}  |  Class ${group}  |  ${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}`, pageW / 2, detailsY, { align: 'center' });
 
       // Rows = days (Mon–Fri), columns = time 7–6; multi-hour lectures as single merged cell (no line in between)
       type PdfCell = string | { content: string; colSpan: number };
@@ -335,7 +335,7 @@ export function StudentTimetableView({
       doc.setTextColor(100, 100, 100);
       doc.text('School of Computing Timetable System', pageW / 2, footerY, { align: 'center' });
 
-      const fileName = `Timetable_${getCourseName(course).replace(/\s+/g, '_')}_${level}_Group_${group}_${semester}.pdf`;
+      const fileName = `Timetable_${getCourseName(course).replace(/\s+/g, '_')}_${level}_Class_${group}_${semester}.pdf`;
       doc.save(fileName);
     } catch (error) {
       console.error('Error generating PDF:', error);
@@ -405,8 +405,8 @@ export function StudentTimetableView({
                 <p className="text-sm font-semibold text-[#0f2044]">{level}</p>
               </div>
               <div className="space-y-1">
-                <p className="text-xs text-slate-500 font-medium">Group</p>
-                <p className="text-sm font-semibold text-[#0f2044]">Group {group}</p>
+                <p className="text-xs text-slate-500 font-medium">Class</p>
+                <p className="text-sm font-semibold text-[#0f2044]">Class {group}</p>
               </div>
             </div>
             <div className="flex flex-wrap justify-end gap-3 mt-6 pt-4 border-t border-slate-200">
@@ -461,8 +461,8 @@ export function StudentTimetableView({
             <CardContent className="py-12 text-center">
               <BookOpen className="size-12 mx-auto text-slate-300 mb-4" />
               <h3 className="text-lg font-semibold text-[#0f2044]">No schedule found</h3>
-              <p className="text-slate-600 mt-2">There is no timetable scheduled yet for {getCourseName(course)} {level} Group {group}.</p>
-              <p className="text-sm text-slate-500 mt-1">Schedules are created by timetable officers. If you just published, try again. Otherwise confirm your session and group are correct.</p>
+              <p className="text-slate-600 mt-2">There is no timetable scheduled yet for {getCourseName(course)} {level} Class {group}.</p>
+              <p className="text-sm text-slate-500 mt-1">Schedules are created by timetable officers. If you just published, try again. Otherwise confirm your session and class are correct.</p>
             </CardContent>
           </Card>
         ) : (

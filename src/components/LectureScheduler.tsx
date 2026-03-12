@@ -81,7 +81,14 @@ interface TimetableEntry {
     semester_id?: number | null;
 }
 
-/** Format class as "400L Group A" from level and group name */
+/** Show group/class name as a single letter (e.g. "A"). Strips "Class " prefix so we don't show "Class A" and "A" twice. */
+function formatGroupDisplayName(name: string | null | undefined): string {
+    if (name == null || String(name).trim() === '') return '—';
+    const s = String(name).trim();
+    const withoutPrefix = s.replace(/^Class\s+/i, '').trim();
+    return withoutPrefix || s;
+}
+
 function formatDay(day: string | null | undefined): string {
     if (day == null || String(day).trim() === '') return '—';
     const d = String(day).trim().toLowerCase();
@@ -503,7 +510,7 @@ export default function LectureScheduler({ activeSession: propsSession, activeSe
         const semesterId = activeSemester?.semester_id ?? activeSemester?.id ?? undefined;
         const hoursRes = await api.checkCourseHoursForGroup(sessionId, Number(course_id), Number(class_group_id), duration, editingId ?? undefined, semesterId);
         if (hoursRes.overLimit) {
-            toast.error(hoursRes.message || 'This course can only be scheduled twice per week for this class group.');
+            toast.error(hoursRes.message || 'This course can only be scheduled twice per week for this class.');
             return;
         }
 
@@ -928,7 +935,7 @@ export default function LectureScheduler({ activeSession: propsSession, activeSe
                     {department && (
                         <p className="text-sm font-medium text-[#0f2044] mt-1">Department: {department}</p>
                     )}
-                    <p className="text-sm text-slate-600 mt-1">Assign lecturers, courses, and class groups to venues and time slots. Venues are shared school-wide; if a venue is already booked for the same day and time, you’ll see an error. Choose another venue or time.</p>
+                    <p className="text-sm text-slate-600 mt-1">Assign lecturers, courses, and classes to venues and time slots. Venues are shared school-wide; if a venue is already booked for the same day and time, you’ll see an error. Choose another venue or time.</p>
                 </div>
                 {activeSession && (
                     <div className="flex flex-wrap items-center gap-2 shrink-0">
@@ -1036,10 +1043,10 @@ export default function LectureScheduler({ activeSession: propsSession, activeSe
                                     <option key={d.department_id ?? d.name} value={d.name}>{d.name}</option>
                                 ))}
                             </select>
-                            <p className="text-xs text-slate-500 mt-1">Lecturers, courses, level and group are from the selected department.</p>
+                            <p className="text-xs text-slate-500 mt-1">Lecturers, courses, level and class are from the selected department.</p>
                         </div>
 
-                        {/* Row 2: Level and Group */}
+                        {/* Row 2: Level and Class */}
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div>
                                 <label className="block text-sm font-medium text-slate-700 mb-2">
@@ -1060,7 +1067,7 @@ export default function LectureScheduler({ activeSession: propsSession, activeSe
 
                             <div>
                                 <label className="block text-sm font-medium text-slate-700 mb-2">
-                                    Group *
+                                    Class *
                                 </label>
                                 <select
                                     value={class_group_id}
@@ -1068,10 +1075,10 @@ export default function LectureScheduler({ activeSession: propsSession, activeSe
                                     className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#ffb71b] focus:border-transparent"
                                     required
                                 >
-                                    <option value="">Select group</option>
+                                    <option value="">Select class</option>
                                     {classGroupsByLevel.map((group) => (
                                         <option key={group.id} value={group.id}>
-                                            {group.name}
+                                            {formatGroupDisplayName(group.name)}
                                         </option>
                                     ))}
                                 </select>
@@ -1272,7 +1279,7 @@ export default function LectureScheduler({ activeSession: propsSession, activeSe
                                         {selectedCourse.title}
                                     </p>
                                     <p>
-                                        <span className="font-medium">Group:</span> {selectedClass.name}
+                                        <span className="font-medium">Group:</span> {formatGroupDisplayName(selectedClass.name)}
                                         {selectedClass.student_count != null && (
                                             <span className="text-slate-600"> ({selectedClass.student_count} students)</span>
                                         )}
@@ -1359,7 +1366,7 @@ export default function LectureScheduler({ activeSession: propsSession, activeSe
                                             <td className="px-4 py-3 text-slate-900 font-medium">{entry.group_department ?? '—'}</td>
                                             <td className="px-4 py-3 text-slate-900">{entry.lecturer_name}</td>
                                             <td className="px-4 py-3 text-slate-900">{entry.course_code}</td>
-                                            <td className="px-4 py-3 text-slate-900">{entry.class_name ?? '—'}</td>
+                                            <td className="px-4 py-3 text-slate-900">{formatGroupDisplayName(entry.class_name) ?? '—'}</td>
                                             <td className="px-4 py-3 text-slate-900">{entry.venue_name}</td>
                                             <td className="px-4 py-3 text-slate-900">{entry.start_time} - {entry.end_time}</td>
                                             <td className="px-4 py-3 text-right">
@@ -1402,7 +1409,7 @@ export default function LectureScheduler({ activeSession: propsSession, activeSe
                     </CardHeader>
                     <CardContent className="p-6 space-y-4">
                         <p className="text-sm text-slate-600">
-                            Select the department, level and group you intend to publish the timetable for. Only completed schedules (no pending course) appear below.
+                            Select the department, level and class you intend to publish the timetable for. Only completed schedules (no pending course) appear below.
                         </p>
                         {completeGroupsList.length === 0 ? (
                             <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg">
@@ -1448,9 +1455,9 @@ export default function LectureScheduler({ activeSession: propsSession, activeSe
                                         className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[#ffb71b]"
                                         disabled={!publishLevel}
                                     >
-                                        <option value="">Select group</option>
+                                        <option value="">Select class</option>
                                         {publishGroupOptions.map((g) => (
-                                            <option key={g.groupId} value={g.groupId}>{g.groupName}</option>
+                                            <option key={g.groupId} value={g.groupId}>{formatGroupDisplayName(g.groupName)}</option>
                                         ))}
                                     </select>
                                 </div>
@@ -1484,7 +1491,7 @@ export default function LectureScheduler({ activeSession: propsSession, activeSe
                         <DialogDescription>
                             {timetablePublished
                                 ? `Re-publish the timetable for ${sessionSemesterLabel || 'this session'} so the student landing page shows your latest changes.`
-                                : `Publish the timetable for ${sessionSemesterLabel || 'this session'}. Students will see their schedule on the landing page when they select their department, level and group.`}
+                                : `Publish the timetable for ${sessionSemesterLabel || 'this session'}. Students will see their schedule on the landing page when they select their department, level and class.`}
                         </DialogDescription>
                     </DialogHeader>
                     <div className="py-2 space-y-3">

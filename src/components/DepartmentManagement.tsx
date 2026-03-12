@@ -146,7 +146,7 @@ export function DepartmentManagement() {
           officers > 0 ? `${officers} officer(s)` : null,
           lecturers > 0 ? `${lecturers} lecturer(s)` : null,
           courses > 0 ? `${courses} course(s)` : null,
-          classGroups > 0 ? `${classGroups} class group(s) deleted` : null,
+          classGroups > 0 ? `${classGroups} class(es) deleted` : null,
           timetableEntries > 0 ? `${timetableEntries} timetable entry(ies) deleted` : null
         ].filter(Boolean).join(', ');
 

@@ -134,21 +134,21 @@ export function TimetableDiscovery({ onSearch }: { onSearch: (data: any) => void
                 </Select>
               </div>
 
-              {/* Group */}
+              {/* Class */}
               <div className="space-y-2">
                 <Label htmlFor="group" className="text-[#0f2044] font-semibold">
-                  Group
+                  Class
                 </Label>
                 <Select value={group} onValueChange={setGroup}>
                   <SelectTrigger id="group" className="border-slate-300 focus:border-[#0f2044] focus:ring-[#0f2044]">
-                    <SelectValue placeholder="Select group" />
+                    <SelectValue placeholder="Select class" />
                   </SelectTrigger>
                   <SelectContent className="">
-                    <SelectItem value="A" className="">Group A</SelectItem>
-                    <SelectItem value="B" className="">Group B</SelectItem>
-                    <SelectItem value="C" className="">Group C</SelectItem>
-                    <SelectItem value="D" className="">Group D</SelectItem>
-                    <SelectItem value="E" className="">Group E</SelectItem>
+                    <SelectItem value="A" className="">Class A</SelectItem>
+                    <SelectItem value="B" className="">Class B</SelectItem>
+                    <SelectItem value="C" className="">Class C</SelectItem>
+                    <SelectItem value="D" className="">Class D</SelectItem>
+                    <SelectItem value="E" className="">Class E</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

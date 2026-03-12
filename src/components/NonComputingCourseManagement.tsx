@@ -298,7 +298,7 @@ export function NonComputingCourseManagement() {
     <div className="space-y-6">
       <div>
         <h2 className="text-2xl font-bold text-[#0f2044]">Non-Computing Courses Management</h2>
-        <p className="text-slate-600 mt-1">Add GEDS/SAT courses by Level, Department, and Group so they are considered when generating the timetable (no time clashes).</p>
+        <p className="text-slate-600 mt-1">Add GEDS/SAT courses by Level, Department, and Class so they are considered when generating the timetable (no time clashes).</p>
       </div>
 
       <Card className="shadow-md">
@@ -377,19 +377,19 @@ export function NonComputingCourseManagement() {
                     </select>
                   </div>
                   <div className="space-y-2">
-                    <Label className="text-[#0f2044] font-semibold">Group</Label>
+                    <Label className="text-[#0f2044] font-semibold">Class</Label>
                     <select
                       value={formData.class_group_id ?? ''}
                       onChange={(e) => setFormData((p) => ({ ...p, class_group_id: e.target.value ? Number(e.target.value) : undefined }))}
                       className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[#ffb71b]"
                     >
-                      <option value="">Select group</option>
+                      <option value="">Select class</option>
                       {classGroups.map((g) => (
                         <option key={g.group_id ?? g.id} value={g.group_id ?? g.id}>{g.name}</option>
                       ))}
                     </select>
                     {formData.department && formData.level != null && classGroups.length === 0 && (
-                      <p className="text-xs text-amber-600">No groups for this department and level. Add groups in Class Management.</p>
+                      <p className="text-xs text-amber-600">No classes for this department and level. Add classes in Class Management.</p>
                     )}
                   </div>
                 </div>
@@ -464,7 +464,7 @@ export function NonComputingCourseManagement() {
                     <th className="text-left py-3 px-4 font-semibold text-[#0f2044]">Title</th>
                     <th className="text-left py-3 px-4 font-semibold text-[#0f2044]">Level</th>
                     <th className="text-left py-3 px-4 font-semibold text-[#0f2044]">Department</th>
-                    <th className="text-left py-3 px-4 font-semibold text-[#0f2044]">Group</th>
+                    <th className="text-left py-3 px-4 font-semibold text-[#0f2044]">Class</th>
                     <th className="text-left py-3 px-4 font-semibold text-[#0f2044]">Lecturer</th>
                     <th className="text-left py-3 px-4 font-semibold text-[#0f2044]">Day</th>
                     <th className="text-left py-3 px-4 font-semibold text-[#0f2044]">Time</th>

@@ -105,7 +105,7 @@ export function PublicTimetableGrid({ filters, onDownloadPDF }: PublicTimetableG
           <div>
             <h2 className="text-3xl font-bold text-[#0f2044] mb-2">Your Weekly Timetable</h2>
             <p className="text-slate-600">
-              {filters.course.toUpperCase()} • {filters.level} - Group {filters.group} • {filters.semester === 'first' ? 'First' : 'Second'} Semester {filters.session}
+              {filters.course.toUpperCase()} • {filters.level} - Class {filters.group} • {filters.semester === 'first' ? 'First' : 'Second'} Semester {filters.session}
             </p>
           </div>
           <Button

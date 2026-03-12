@@ -451,18 +451,18 @@ export function StudentLandingPage({ onOfficerLoginClick }: { onOfficerLoginClic
                     </Select>
                   </div>
 
-                  {/* Group */}
+                  {/* Class */}
                   <div className="space-y-2">
                     <label className="text-sm font-semibold text-[#0f2044]">
-                      Group
+                      Class
                     </label>
                     <Select value={selectedGroup} onValueChange={setSelectedGroup}>
                       <SelectTrigger className="h-12 border-2 border-slate-300 focus:border-[#ffb71b]">
-                        <SelectValue placeholder="Select group" />
+                        <SelectValue placeholder="Select class" />
                       </SelectTrigger>
                       <SelectContent className="">
                         {getGroupsForLevel().map(group => (
-                          <SelectItem className="" key={group} value={group}>{selectedLevel} Level - Group {group}</SelectItem>
+                          <SelectItem className="" key={group} value={group}>{selectedLevel} Level - Class {group}</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
@@ -476,7 +476,7 @@ export function StudentLandingPage({ onOfficerLoginClick }: { onOfficerLoginClic
                     className="w-full h-12 bg-[#0f2044] hover:bg-[#0f2044]/90 text-white font-semibold"
                   >
                     <Search className="mr-2 size-5" />
-                    View my timetable (by group)
+                    View my timetable (by class)
                   </Button>
                   <Button
                     onClick={() => handleViewTimetable('level')}
@@ -484,7 +484,7 @@ export function StudentLandingPage({ onOfficerLoginClick }: { onOfficerLoginClic
                     variant="outline"
                     className="w-full h-11 border-2 border-[#0f2044] text-[#0f2044] hover:bg-[#0f2044]/5 font-medium"
                   >
-                    View level timetable (all groups)
+                    View level timetable (all classes)
                   </Button>
                   <Button
                     onClick={() => handleViewTimetable('department')}
@@ -492,7 +492,7 @@ export function StudentLandingPage({ onOfficerLoginClick }: { onOfficerLoginClic
                     variant="outline"
                     className="w-full h-11 border-2 border-slate-400 text-slate-700 hover:bg-slate-50 font-medium"
                   >
-                    View department timetable (all levels & groups)
+                    View department timetable (all levels & classes)
                   </Button>
                 </div>
               </div>

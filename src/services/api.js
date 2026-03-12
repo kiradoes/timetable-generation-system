@@ -264,7 +264,8 @@ class ApiService {
   }
 
   /** Recent activity from audit_log (what officers did). Returns same shape as getRecentOfficerActivities for dashboard.
-   * options.department: when set, only return activity from officers in that department (for DTTO). */
+   * options.department: when set, only return activity from officers in that department (for DTTO).
+   * options.departmentOfficersOnly: when true (and no department), only return activity from department officers (for STTO dashboard; excludes school officer). */
   async getRecentAuditActivity(limit = 15, options = {}) {
     let logs = [];
     if (options.department) {
@@ -275,6 +276,22 @@ class ApiService {
         .from('officers')
         .select('officer_id')
         .ilike('department', deptPattern);
+      const officerIds = (deptOfficers || []).map((o) => o.officer_id).filter((id) => id != null);
+      if (officerIds.length === 0) return this.handleResponse([], null);
+      const { data: departmentLogs, error: logError } = await supabase
+        .from('audit_log')
+        .select('log_id, table_name, action, changed_at, changed_by, new_values')
+        .in('changed_by', officerIds)
+        .order('changed_at', { ascending: false })
+        .limit(limit * 3);
+      if (logError) return this.handleResponse(null, logError);
+      logs = departmentLogs || [];
+    } else if (options.departmentOfficersOnly) {
+      const { data: deptOfficers } = await supabase
+        .from('officers')
+        .select('officer_id')
+        .eq('role', 'department-officer')
+        .eq('status', 'active');
       const officerIds = (deptOfficers || []).map((o) => o.officer_id).filter((id) => id != null);
       if (officerIds.length === 0) return this.handleResponse([], null);
       const { data: departmentLogs, error: logError } = await supabase
@@ -355,7 +372,7 @@ class ApiService {
     return this.handleResponse(items, null);
   }
 
-  /** Recent activities from department officers. Prefers audit_log actions; then falls back to schedules in that department (so DTTO sees "Scheduled lecture: ..." even when schedules were seeded); then last login. */
+  /** Recent activities. When options.departmentOfficersOnly is true, only department officers' activity (for STTO dashboard). When options.department is set, only that department (for DTTO). Otherwise all. Falls back to schedules or last login when no audit. */
   async getRecentOfficerActivities(limit = 15, options = {}) {
     const auditRes = await this.getRecentAuditActivity(limit, options);
     if (auditRes.success && Array.isArray(auditRes.data) && auditRes.data.length > 0) {
@@ -1099,7 +1116,7 @@ class ApiService {
           const key = `${g.group_id}-${c.course_id}`;
           const totalMins = hoursByKey.get(key) || 0;
           if (totalMins < requiredHours * 60) {
-            const groupLabel = g.name ? `${g.level}L ${g.department} Group ${g.name}` : `${g.level}L ${g.department}`;
+            const groupLabel = g.name ? `${g.level}L ${g.department} Class ${g.name}` : `${g.level}L ${g.department}`;
             missing.push({
               group: groupLabel,
               course: c.course_code || c.title || 'Course',
@@ -1170,7 +1187,7 @@ class ApiService {
         const requiredMins = requiredHrs * 60;
         const totalMins = hoursByKey.get(key) || 0;
         if (totalMins < requiredMins) {
-          const groupLabel = g.name ? `${g.level}L ${g.department} Group ${g.name}` : `${g.level}L ${g.department}`;
+          const groupLabel = g.name ? `${g.level}L ${g.department} Class ${g.name}` : `${g.level}L ${g.department}`;
           missing.push({
             group: groupLabel,
             course: c.course_code || c.title || 'Course',
@@ -1310,7 +1327,7 @@ class ApiService {
     return this.handleResponse(data, error);
   }
 
-  /** Get course_ids allowed for (session, department, level). Returns null if no mappings (show all courses); otherwise array of course_id. */
+  /** Get course_ids allowed for (session, department, level). Returns null if no mappings (Schedule Lecture shows no courses); otherwise array of course_id so only these show in the course dropdown. */
   async getCourseIdsForClass(sessionId, department, level) {
     if (!sessionId || department == null || department === '' || level == null || level === '') return null;
     const lvl = Number(level);

@@ -236,7 +236,7 @@ function OverviewView({
                       department: userDepartment,
                     });
                     if (!res.success || !res.data) {
-                      alert(res.error || 'Unable to generate coverage report.');
+                      alert(res.error || 'Unable to generate summary report.');
                       return;
                     }
                     const missing = Array.isArray(res.data.missing) ? res.data.missing : [];
@@ -262,21 +262,21 @@ function OverviewView({
                     a.href = url;
                     const semLabel = activeSemester ? String(activeSemester).replace(/\s+/g, '_') : 'semester';
                     const deptLabel = userDepartment ? userDepartment.replace(/\s+/g, '_') : 'department';
-                    a.download = `coverage_report_${deptLabel}_${semLabel}.csv`;
+                    a.download = `summary_report_${deptLabel}_${semLabel}.csv`;
                     document.body.appendChild(a);
                     a.click();
                     document.body.removeChild(a);
                     URL.revokeObjectURL(url);
                   } catch (err) {
                     console.error('Failed to download coverage report:', err);
-                    alert('Failed to generate coverage report.');
+                    alert('Failed to generate summary report.');
                   } finally {
                     setDownloadingCoverage(false);
                   }
                 }}
                 disabled={downloadingCoverage}
               >
-                {downloadingCoverage ? 'Preparing Coverage Report…' : 'Download Coverage Report'}
+                {downloadingCoverage ? 'Preparing Summary Report…' : 'Download Summary Report'}
               </Button>
             )}
           </CardTitle>

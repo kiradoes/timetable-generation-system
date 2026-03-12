@@ -1,4 +1,4 @@
-import { BookOpen, Check, LayoutGrid, Loader2 } from 'lucide-react';
+import { BookOpen, Check, LayoutGrid, Loader2, X } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import api from '../services/api';
@@ -34,6 +34,7 @@ export function ClassToCourseManagement({
   const [mappedCourses, setMappedCourses] = useState<{ course_id: number; course_code: string; title?: string }[]>([]);
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [courseDropdownValue, setCourseDropdownValue] = useState<string>('');
 
   const departmentForQuery = isDTTO ? effectiveDepartment : selectedDepartment;
 
@@ -117,8 +118,22 @@ export function ClassToCourseManagement({
     );
   };
 
+  const removeMappedCourse = (courseId: number) => {
+    setSelectedCourseIds((prev) => prev.filter((id) => id !== courseId));
+  };
+
+  /** Add a course to the selection when chosen from the dropdown (single-select). */
+  const addCourseFromDropdown = (courseIdStr: string) => {
+    const id = courseIdStr ? Number(courseIdStr) : NaN;
+    if (!Number.isNaN(id) && !selectedCourseIds.includes(id)) {
+      setSelectedCourseIds((prev) => [...prev, id]);
+    }
+    setCourseDropdownValue('');
+  };
+
   const canSubmit = Boolean(sessionId && departmentForQuery && selectedLevel);
   const classLabel = departmentForQuery && selectedLevel ? `${departmentForQuery} · Level ${selectedLevel}` : '—';
+  const currentSelectedCourses = allCourses.filter((c) => selectedCourseIds.includes(c.course_id));
 
   return (
     <div className="space-y-6">
@@ -180,70 +195,77 @@ export function ClassToCourseManagement({
           </div>
 
           {departmentForQuery && selectedLevel && (
-            <>
-              <div>
-                <Label className="text-[#0f2044] font-medium">Courses (scroll to see all) – select the courses for this class</Label>
-                <p className="text-xs text-slate-500 mt-0.5">Only selected courses will appear in Schedule Lecture for this department and level.</p>
-                {loading ? (
-                  <div className="mt-2 flex items-center gap-2 text-slate-600">
-                    <Loader2 className="size-4 animate-spin" /> Loading courses…
-                  </div>
-                ) : (
-                  <div className="mt-2 max-h-56 overflow-y-auto border border-slate-200 rounded-md p-2 bg-white space-y-1">
-                    {allCourses.length === 0 && (
-                      <p className="text-sm text-slate-500 py-2">No computing courses found. Add courses in Course Management first.</p>
-                    )}
-                    {allCourses.map((c) => (
-                      <label key={c.course_id} className="flex items-center gap-2 py-1.5 px-2 hover:bg-slate-50 rounded cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={selectedCourseIds.includes(c.course_id)}
-                          onChange={() => toggleCourse(c.course_id)}
-                          className="rounded border-slate-300"
-                        />
-                        <span className="font-mono text-sm">{c.course_code}</span>
-                        <span className="text-slate-600 text-sm truncate">{c.title}</span>
-                      </label>
-                    ))}
-                  </div>
-                )}
+            <div className="pt-2 space-y-2">
+              <p className="text-xs text-slate-500">Only selected courses will appear in Schedule Lecture for this class (dept + level for STTO, level for DTTO). Pick from the list and click Submit to save.</p>
+              <div className="flex flex-wrap items-start gap-4 md:gap-6">
+                {/* All courses: single scrollable dropdown – select one to add to the list beside */}
+                <div className="flex-shrink-0">
+                  <Label className="text-[#0f2044] font-medium block mb-1">All courses</Label>
+                  {loading ? (
+                    <div className="flex items-center gap-2 text-slate-600 py-2">
+                      <Loader2 className="size-4 animate-spin" /> Loading…
+                    </div>
+                  ) : allCourses.length === 0 ? (
+                    <p className="text-sm text-slate-500 py-2">No computing courses. Add courses in Course Management first.</p>
+                  ) : (
+                    <select
+                      value={courseDropdownValue}
+                      onChange={(e) => addCourseFromDropdown(e.target.value)}
+                      size={Math.min(12, Math.max(6, allCourses.length + 1))}
+                      className="w-full min-w-[10rem] max-w-[14rem] px-2 py-1.5 border border-slate-300 rounded-md bg-white font-mono text-sm text-[#0f2044] focus:ring-2 focus:ring-[#0f2044]/20 focus:border-[#0f2044] block"
+                    >
+                      <option value="">Select course…</option>
+                      {allCourses.map((c) => (
+                        <option key={c.course_id} value={c.course_id}>
+                          {c.course_code}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+
+                {/* Submit in the middle */}
+                <div className="flex items-end flex-shrink-0 pt-6 md:pt-0">
+                  <Button
+                    onClick={handleSubmit}
+                    disabled={!canSubmit || submitting}
+                    className="bg-[#0f2044] hover:bg-[#0f2044]/90"
+                  >
+                    {submitting ? <><Loader2 className="size-4 animate-spin mr-2" /> Saving…</> : <><Check className="size-4 mr-2" /> Submit</>}
+                  </Button>
+                </div>
+
+                {/* Selected courses shown beside – chips with X */}
+                <div className="flex-1 min-w-0">
+                  <Label className="text-[#0f2044] font-medium block mb-1">Selected for this class</Label>
+                  {currentSelectedCourses.length === 0 ? (
+                    <p className="text-slate-500 text-sm py-2">None yet. Select courses from the dropdown and click Submit.</p>
+                  ) : (
+                    <div className="flex flex-wrap gap-2">
+                      {currentSelectedCourses.map((c) => (
+                        <span
+                          key={c.course_id}
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-[#0f2044]/10 text-[#0f2044] font-mono text-sm"
+                        >
+                          {c.course_code}
+                          <button
+                            type="button"
+                            onClick={() => removeMappedCourse(c.course_id)}
+                            className="p-0.5 rounded hover:bg-red-100 text-slate-500 hover:text-red-600"
+                            title="Remove"
+                          >
+                            <X className="size-3.5" />
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
-              <div className="flex items-center gap-2">
-                <Button
-                  onClick={handleSubmit}
-                  disabled={!canSubmit || submitting}
-                  className="bg-[#0f2044] hover:bg-[#0f2044]/90"
-                >
-                  {submitting ? <><Loader2 className="size-4 animate-spin mr-2" /> Saving…</> : <><Check className="size-4 mr-2" /> Submit</>}
-                </Button>
-              </div>
-            </>
+            </div>
           )}
         </CardContent>
       </Card>
-
-      {departmentForQuery && selectedLevel && (
-        <Card className="border-slate-200 shadow">
-          <CardHeader className="bg-green-50 border-b border-green-200">
-            <CardTitle className="text-lg text-green-900">Selected courses for this class</CardTitle>
-            <p className="text-sm text-green-800">These are the courses that will show in Schedule Lecture when you pick <strong>{classLabel}</strong>.</p>
-          </CardHeader>
-          <CardContent className="pt-4">
-            {mappedCourses.length === 0 ? (
-              <p className="text-slate-500 text-sm">No courses saved yet. Select courses above and click Submit.</p>
-            ) : (
-              <ul className="space-y-1">
-                {mappedCourses.map((c) => (
-                  <li key={c.course_id} className="flex items-center gap-2 text-sm">
-                    <span className="font-mono font-medium text-[#0f2044]">{c.course_code}</span>
-                    {c.title && <span className="text-slate-600">{c.title}</span>}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </CardContent>
-        </Card>
-      )}
     </div>
   );
 }
