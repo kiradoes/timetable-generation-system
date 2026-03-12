@@ -1048,6 +1048,11 @@ class ApiService {
    */
   async canPublishSemester(semesterId, options = {}) {
     const publishGroupId = options.publish_group_id != null ? Number(options.publish_group_id) : null;
+    const departmentFilterRaw = options.department;
+    const departmentFilter =
+      typeof departmentFilterRaw === 'string' && departmentFilterRaw.trim()
+        ? departmentFilterRaw.trim()
+        : null;
     const { data: semester } = await supabase.from('semesters').select('session_id, name').eq('semester_id', semesterId).maybeSingle();
     if (!semester?.session_id) return this.handleResponse(null, { message: 'Semester not found.' });
     const sessionId = semester.session_id;
@@ -1057,6 +1062,9 @@ class ApiService {
 
     const { data: groupsRaw } = await supabase.from('class_groups').select('group_id, department, level, name').eq('session_id', sessionId).eq('status', 'active');
     let groups = groupsRaw || [];
+    if (departmentFilter) {
+      groups = groups.filter((g) => (g.department || '').trim() === departmentFilter);
+    }
     if (publishGroupId != null) {
       groups = groups.filter((g) => Number(g.group_id) === publishGroupId);
       if (groups.length === 0) return this.handleResponse(null, { message: 'Selected group not found or inactive.' });
@@ -1276,6 +1284,49 @@ class ApiService {
   }
 
   // =====================================================
+  // CLASS TO COURSE MAPPING (Class to Course Management)
+  // =====================================================
+
+  /** Get mappings for (session, optional department, optional level). Returns rows with mapping_id, session_id, department, level, course_id. */
+  async getClassCourseMappings(sessionId, opts = {}) {
+    let q = supabase.from('class_course_mapping').select('*').eq('session_id', sessionId);
+    if (opts.department != null && opts.department !== '') q = q.eq('department', opts.department);
+    if (opts.level != null && opts.level !== '') q = q.eq('level', Number(opts.level));
+    const { data, error } = await q.order('level').order('course_id');
+    return this.handleResponse(data, error);
+  }
+
+  /** Set course mappings for a class (session, department, level). Replaces any existing. courseIds = array of course_id. */
+  async setClassCourseMappings(sessionId, department, level, courseIds) {
+    const dept = String(department).trim();
+    const lvl = Number(level);
+    if (!sessionId || !dept || (lvl !== 0 && !lvl)) return this.handleResponse(null, { message: 'session_id, department, and level are required.' });
+    const { error: delErr } = await supabase.from('class_course_mapping').delete().eq('session_id', sessionId).eq('department', dept).eq('level', lvl);
+    if (delErr) return this.handleResponse(null, delErr);
+    const ids = Array.isArray(courseIds) ? courseIds.map((id) => Number(id)).filter((n) => !Number.isNaN(n) && n > 0) : [];
+    if (ids.length === 0) return this.handleResponse({ deleted: true, count: 0 }, null);
+    const rows = ids.map((course_id) => ({ session_id: sessionId, department: dept, level: lvl, course_id }));
+    const { data, error } = await supabase.from('class_course_mapping').insert(rows).select();
+    return this.handleResponse(data, error);
+  }
+
+  /** Get course_ids allowed for (session, department, level). Returns null if no mappings (show all courses); otherwise array of course_id. */
+  async getCourseIdsForClass(sessionId, department, level) {
+    if (!sessionId || department == null || department === '' || level == null || level === '') return null;
+    const lvl = Number(level);
+    if (Number.isNaN(lvl)) return null;
+    const { data, error } = await supabase
+      .from('class_course_mapping')
+      .select('course_id')
+      .eq('session_id', sessionId)
+      .eq('department', String(department).trim())
+      .eq('level', lvl);
+    if (error) return null;
+    if (!Array.isArray(data) || data.length === 0) return null;
+    return data.map((r) => r.course_id);
+  }
+
+  // =====================================================
   // TIMETABLES
   // =====================================================
 
@@ -1399,6 +1450,7 @@ class ApiService {
         course_code: course.course_code || '—',
         course_title: course.title,
         course_name: course.title || course.course_code || '—',
+        course_category: course.category || null,
         class_name: group.name || '—',
         group_name: group.name || '—',
         group_level: group.level,
@@ -1470,6 +1522,87 @@ class ApiService {
           message: `This venue is already in use by another class (${dept}: ${course}) at ${row.day_of_week || row.day} ${row.start_time}–${row.end_time}. A venue cannot be assigned to more than one class at the same time. Please choose another venue or time.`,
         };
       }
+    }
+    return { success: true, conflict: false };
+  }
+
+  /**
+   * Class day limits: max 6 hours total per class per day; max 3 hours in any single continuous stretch.
+   * Returns { success, conflict, message }.
+   */
+  async checkClassDayLimits(sessionId, groupId, day, startTime, endTime, excludeScheduleId = null, semesterId = null) {
+    const MAX_HOURS_PER_DAY = 6;
+    const MAX_HOURS_STRETCH = 3;
+    const toMinutes = (t) => {
+      const [h, m] = String(t).slice(0, 5).split(':').map(Number);
+      return (h || 0) * 60 + (m || 0);
+    };
+    const res = await this.getSchedulesWithDetails({ session_id: sessionId, group_id: groupId });
+    let rows = (res.success && Array.isArray(res.data)) ? res.data : [];
+    if (semesterId != null) {
+      const concurrentIds = await this._getConcurrentSemesterIds(sessionId, semesterId);
+      if (Array.isArray(concurrentIds) && concurrentIds.length > 0) {
+        rows = rows.filter((row) => row.semester_id == null || concurrentIds.includes(row.semester_id));
+      } else {
+        rows = rows.filter((row) => row.semester_id == null || row.semester_id === semesterId);
+      }
+    }
+    let intervals = [];
+    for (const row of rows) {
+      if ((row.day_of_week || row.day) !== day) continue;
+      if (excludeScheduleId != null && (row.schedule_id === excludeScheduleId || row.id === excludeScheduleId)) continue;
+      const s = toMinutes(row.start_time);
+      const e = toMinutes(row.end_time);
+      if (e > s) intervals.push([s, e]);
+    }
+    const { data: ncCourses } = await supabase.from('courses').select('course_id, assignment').in('category', ['GEDS', 'SAT']).eq('session_id', sessionId);
+    const forGroup = (ncCourses || []).filter((c) => {
+      const a = typeof c.assignment === 'string' ? (() => { try { return JSON.parse(c.assignment); } catch (_) { return {}; } })() : (c.assignment || {});
+      return Number(a.class_group_id) === Number(groupId);
+    });
+    for (const c of forGroup) {
+      const a = typeof c.assignment === 'string' ? (() => { try { return JSON.parse(c.assignment); } catch (_) { return {}; } })() : (c.assignment || {});
+      if ((a.day_of_week || '') !== day || !a.start_time || !a.end_time) continue;
+      const s = toMinutes(a.start_time);
+      const e = toMinutes(a.end_time);
+      if (e > s) intervals.push([s, e]);
+    }
+    const newStart = toMinutes(String(startTime).slice(0, 5));
+    const newEnd = toMinutes(String(endTime).slice(0, 5));
+    if (newEnd > newStart) intervals.push([newStart, newEnd]);
+    if (intervals.length === 0) return { success: true, conflict: false };
+    intervals.sort((a, b) => a[0] - b[0]);
+    const merged = [];
+    for (const [s, e] of intervals) {
+      if (merged.length === 0) {
+        merged.push([s, e]);
+        continue;
+      }
+      const last = merged[merged.length - 1];
+      if (s <= last[1]) {
+        last[1] = Math.max(last[1], e);
+      } else {
+        merged.push([s, e]);
+      }
+    }
+    let totalMins = 0;
+    for (const [s, e] of merged) {
+      totalMins += e - s;
+      const stretchHours = (e - s) / 60;
+      if (stretchHours > MAX_HOURS_STRETCH) {
+        return {
+          success: true,
+          conflict: true,
+          message: `This class would have a continuous block of ${stretchHours.toFixed(1)} hours on ${day} (maximum ${MAX_HOURS_STRETCH} hours at a stretch allowed). Split the schedule or choose a different time.`,
+        };
+      }
+    }
+    if (totalMins > MAX_HOURS_PER_DAY * 60) {
+      return {
+        success: true,
+        conflict: true,
+        message: `This class would have ${(totalMins / 60).toFixed(1)} hours on ${day} (maximum ${MAX_HOURS_PER_DAY} hours per day per class). Choose another day or remove another slot.`,
+      };
     }
     return { success: true, conflict: false };
   }
@@ -1740,6 +1873,8 @@ class ApiService {
       if (classCheck.conflict) return this.handleResponse(null, { message: classCheck.message });
       const lecturerCheck = await this.checkLecturerTimeConflict(data.session_id, data.lecturer_id, day, startStr, endStr, null);
       if (lecturerCheck.conflict) return this.handleResponse(null, { message: lecturerCheck.message });
+      const dayLimitsCheck = await this.checkClassDayLimits(data.session_id, groupId, day, startStr, endStr, null, slotSemesterId);
+      if (dayLimitsCheck.conflict) return this.handleResponse(null, { message: dayLimitsCheck.message });
       let classSize = 0;
       if (data.class_group_id) {
         const { data: grp } = await supabase.from('class_groups').select('student_count').eq('group_id', data.class_group_id).maybeSingle();
@@ -1773,6 +1908,8 @@ class ApiService {
       if (classCheck.conflict) return this.handleResponse(null, { message: classCheck.message });
       const lecturerCheck = await this.checkLecturerTimeConflict(data.session_id, data.lecturer_id, data.day, startStr, endStr, null);
       if (lecturerCheck.conflict) return this.handleResponse(null, { message: lecturerCheck.message });
+      const dayLimitsCheck = await this.checkClassDayLimits(data.session_id, data.class_group_id, data.day, startStr, endStr, null, semesterId);
+      if (dayLimitsCheck.conflict) return this.handleResponse(null, { message: dayLimitsCheck.message });
       let classSize = 0;
       if (data.class_group_id) {
         const { data: grp } = await supabase.from('class_groups').select('student_count').eq('group_id', data.class_group_id).maybeSingle();
@@ -1880,6 +2017,8 @@ class ApiService {
         if (classCheck.conflict) return this.handleResponse(null, { message: classCheck.message });
         const lecturerCheck = await this.checkLecturerTimeConflict(sessionId, effectiveLecturer, day, startStr, endStr, id);
         if (lecturerCheck.conflict) return this.handleResponse(null, { message: lecturerCheck.message });
+        const dayLimitsCheck = await this.checkClassDayLimits(sessionId, groupId, day, startStr, endStr, id, semesterIdForHours);
+        if (dayLimitsCheck.conflict) return this.handleResponse(null, { message: dayLimitsCheck.message });
       } else if (existing.slot_id) {
         const { data: slotRow } = await supabase.from('time_slots').select('day_of_week, start_time, end_time').eq('slot_id', existing.slot_id).maybeSingle();
         if (slotRow) {
@@ -1892,6 +2031,8 @@ class ApiService {
           if (classCheck.conflict) return this.handleResponse(null, { message: classCheck.message });
           const lecturerCheck = await this.checkLecturerTimeConflict(sessionId, effectiveLecturer, day, startStr, endStr, id);
           if (lecturerCheck.conflict) return this.handleResponse(null, { message: lecturerCheck.message });
+          const dayLimitsCheck = await this.checkClassDayLimits(sessionId, groupId, day, startStr, endStr, id, semesterIdForHours);
+          if (dayLimitsCheck.conflict) return this.handleResponse(null, { message: dayLimitsCheck.message });
         }
       }
       if (groupId && effectiveVenue) {

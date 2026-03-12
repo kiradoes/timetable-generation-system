@@ -383,7 +383,8 @@ export function StudentTimetableView({
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <Card className="mb-6 shadow-lg border-t-4 border-t-[#ffb71b]">
           <CardHeader className="bg-gradient-to-r from-[#0f2044] to-[#1a3a6b]">
-            <CardTitle className="text-white">Your Timetable Details</CardTitle>
+            <CardTitle className="text-white">Summary</CardTitle>
+            <p className="text-slate-300 text-sm mt-1">View your schedule below; you can download it as PDF.</p>
           </CardHeader>
           <CardContent className="pt-6">
             <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
@@ -408,36 +409,35 @@ export function StudentTimetableView({
                 <p className="text-sm font-semibold text-[#0f2044]">Group {group}</p>
               </div>
             </div>
+            <div className="flex flex-wrap justify-end gap-3 mt-6 pt-4 border-t border-slate-200">
+              <Button
+                onClick={exportToPDF}
+                disabled={isExporting || timetableData.length === 0}
+                className="bg-[#0f2044] hover:bg-[#0f2044]/90 text-white"
+              >
+                {isExporting ? (
+                  <>
+                    <div className="mr-2 size-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    Generating...
+                  </>
+                ) : (
+                  <>
+                    <Download className="mr-2 size-4" />
+                    Download as PDF
+                  </>
+                )}
+              </Button>
+              <Button
+                onClick={() => window.print()}
+                variant="outline"
+                className="border-[#0f2044] text-[#0f2044] hover:bg-[#0f2044]/5"
+              >
+                <Printer className="mr-2 size-4" />
+                Print
+              </Button>
+            </div>
           </CardContent>
         </Card>
-
-        <div className="flex justify-end gap-3 mb-6">
-          <Button
-            onClick={exportToPDF}
-            disabled={isExporting || timetableData.length === 0}
-            className="bg-[#0f2044] hover:bg-[#0f2044]/90 text-white"
-          >
-            {isExporting ? (
-              <>
-                <div className="mr-2 size-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                Generating...
-              </>
-            ) : (
-              <>
-                <Download className="mr-2 size-4" />
-                Download / Export as PDF
-              </>
-            )}
-          </Button>
-          <Button
-            onClick={() => window.print()}
-            variant="outline"
-            className="border-[#0f2044] text-[#0f2044] hover:bg-[#0f2044]/5"
-          >
-            <Printer className="mr-2 size-4" />
-            Print
-          </Button>
-        </div>
 
         {timetableNotPublished ? (
           <Card className="shadow-lg border-amber-200 bg-amber-50">

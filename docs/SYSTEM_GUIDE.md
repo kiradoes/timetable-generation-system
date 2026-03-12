@@ -617,6 +617,10 @@ Computing courses for all 5 departments managed by the School Officer.
 
 ### System-Wide Features
 
+✅ **Semester-based data**
+- Summary and scheduling data are cleared after each semester.
+- Each new semester starts with no schedule entries or timetable summary; officers build schedules afresh for that semester.
+
 ✅ **Conflict Detection**
 - No lecturer double-booking
 - No venue double-booking

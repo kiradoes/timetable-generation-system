@@ -99,12 +99,26 @@ export function DepartmentTimetableScheduling({ departmentName, sessionId, activ
     const [filterClass, setFilterClass] = useState<string>('');
     const [showApproveModal, setShowApproveModal] = useState(false);
     const [approving, setApproving] = useState(false);
+    const [allowedCourseIdsForClass, setAllowedCourseIdsForClass] = useState<number[] | null>(null);
 
     useEffect(() => {
         if (departmentName && sessionId) {
             fetchAllData();
         }
     }, [departmentName, sessionId]);
+
+    // Class-to-course mapping: fetch allowed course IDs for (session, department, level)
+    useEffect(() => {
+        if (!sessionId || !departmentName || !formData.level) {
+            setAllowedCourseIdsForClass(null);
+            return;
+        }
+        let cancelled = false;
+        api.getCourseIdsForClass(sessionId, departmentName, formData.level).then((ids) => {
+            if (!cancelled) setAllowedCourseIdsForClass(ids ?? null);
+        });
+        return () => { cancelled = true; };
+    }, [sessionId, departmentName, formData.level]);
 
     // Fetch all semesters for the session so user can select First, Second, Summer, or Post-SIWES (6-hour logic)
     useEffect(() => {
@@ -236,6 +250,13 @@ export function DepartmentTimetableScheduling({ departmentName, sessionId, activ
             return;
         }
 
+        const semesterIdForDayLimits = activeSemester?.semester_id ?? undefined;
+        const dayLimitsRes = await api.checkClassDayLimits(sessionId!, parseInt(formData.class_group_id), formData.day_of_week, start, end, editingId ?? undefined, semesterIdForDayLimits);
+        if (dayLimitsRes?.conflict) {
+            toast.error(dayLimitsRes.message || 'Class day limits exceeded (max 6 hours per day, max 3 hours at a stretch). Choose another day or time.');
+            return;
+        }
+
         const specialConflictRes = await api.checkSpecialEventConflict(sessionId!, formData.day_of_week, start, end, formData.level || null);
         if (specialConflictRes?.conflict) {
             toast.error(specialConflictRes.message || 'This time is blocked by a special event (Break or Chapel Seminar). Choose another time.');
@@ -328,8 +349,13 @@ export function DepartmentTimetableScheduling({ departmentName, sessionId, activ
 
     // Class groups: only those set in Class Management for the selected level (show nothing until level is chosen)
     const groupsByLevel = formData.level ? groups.filter((g: any) => String(g.level) === String(formData.level)) : [];
-    // Courses: only for the selected level and department
+    // Courses: only for the selected level and department; then filter by class-to-course mapping. If no mapping for this class, show no courses.
     const coursesByLevel = formData.level ? courses.filter((c: any) => String(c.level) === String(formData.level)) : [];
+    const coursesByLevelFiltered = useMemo(() => {
+        if (allowedCourseIdsForClass === null) return []; // no mapping for this class → show no courses until one is set
+        const idSet = new Set(allowedCourseIdsForClass);
+        return coursesByLevel.filter((c: any) => idSet.has(Number(c.course_id ?? c.id)));
+    }, [coursesByLevel, allowedCourseIdsForClass]);
 
     const activeSemesterId = activeSemester?.semester_id ?? null;
     const isPostSiwesSemester = Boolean(
@@ -387,8 +413,8 @@ export function DepartmentTimetableScheduling({ departmentName, sessionId, activ
 
     const coursesAvailableForGroup = useMemo(() => {
         const groupId = formData.class_group_id ? parseInt(formData.class_group_id, 10) : null;
-        if (!groupId) return coursesByLevel;
-        return coursesByLevel.filter((c: any) => {
+        if (!groupId) return coursesByLevelFiltered;
+        return coursesByLevelFiltered.filter((c: any) => {
             const courseId = Number(c.course_id ?? c.id);
             const key = `${courseId}-${groupId}`;
             if (isPostSiwesSemester) {
@@ -410,7 +436,7 @@ export function DepartmentTimetableScheduling({ departmentName, sessionId, activ
             if (atMax) return editingId != null && Number(editingEntryCourseId) === courseId;
             return true;
         });
-    }, [coursesByLevel, formData.class_group_id, scheduledHoursByCourseGroup, isPostSiwesSemester, isSummerSemester, editingId, editingEntryCourseId]);
+    }, [coursesByLevelFiltered, formData.class_group_id, scheduledHoursByCourseGroup, isPostSiwesSemester, isSummerSemester, editingId, editingEntryCourseId]);
 
     // Clear course selection when it's no longer in the list (e.g. just reached 2 slots for this class)
     useEffect(() => {
@@ -502,10 +528,12 @@ export function DepartmentTimetableScheduling({ departmentName, sessionId, activ
         let cancelled = false;
         const run = async () => {
             try {
-                const [venueRes, groupRes, specialRes] = await Promise.all([
+                const semesterId = activeSemester?.semester_id ?? undefined;
+                const [venueRes, groupRes, specialRes, dayLimitsRes] = await Promise.all([
                     api.checkVenueConflict(sessionId, parseInt(formData.venue_id), formData.day_of_week, start, end, editingId ?? undefined),
                     api.checkClassGroupTimeConflict(sessionId, parseInt(formData.class_group_id), formData.day_of_week, start, end, editingId ?? undefined, formData.course_id ? parseInt(formData.course_id) : undefined),
                     api.checkSpecialEventConflict(sessionId, formData.day_of_week, start, end, formData.level || null),
+                    api.checkClassDayLimits(sessionId, parseInt(formData.class_group_id), formData.day_of_week, start, end, editingId ?? undefined, semesterId),
                 ]);
                 if (cancelled) return;
                 if (venueRes?.conflict) {
@@ -518,6 +546,10 @@ export function DepartmentTimetableScheduling({ departmentName, sessionId, activ
                 }
                 if (specialRes?.conflict) {
                     setConflictValidation({ success: false, error: specialRes.message || 'This time is blocked by a special event.' });
+                    return;
+                }
+                if (dayLimitsRes?.conflict) {
+                    setConflictValidation({ success: false, error: dayLimitsRes.message || 'Class day limits exceeded (max 6 hours per day, max 3 hours at a stretch).' });
                     return;
                 }
                 if (formData.course_id) {
@@ -773,7 +805,7 @@ export function DepartmentTimetableScheduling({ departmentName, sessionId, activ
                                                 </option>
                                             );
                                         })}
-                                        {coursesAvailableForGroup.length === 0 && coursesByLevel.length > 0 && (
+                                        {coursesAvailableForGroup.length === 0 && coursesByLevelFiltered.length > 0 && (
                                             <option disabled>All courses for this class are already scheduled</option>
                                         )}
                                     </select>

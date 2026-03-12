@@ -137,6 +137,7 @@ export default function LectureScheduler({ activeSession: propsSession, activeSe
     const [lecturerPreferenceText, setLecturerPreferenceText] = useState<string | null>(null);
     const [showApproveModal, setShowApproveModal] = useState(false);
     const [approving, setApproving] = useState(false);
+    const [allowedCourseIdsForClass, setAllowedCourseIdsForClass] = useState<number[] | null>(null);
 
     // Fetch all sessions from DB for dropdown
     useEffect(() => {
@@ -263,6 +264,20 @@ export default function LectureScheduler({ activeSession: propsSession, activeSe
         setClassGroupId('');
     }, [department]);
 
+    // Class-to-course mapping: fetch allowed course IDs for (session, department, level) so dropdown is filtered
+    useEffect(() => {
+        const sessionId = activeSession?.session_id ?? activeSession?.id;
+        if (!sessionId || !department || !level) {
+            setAllowedCourseIdsForClass(null);
+            return;
+        }
+        let cancelled = false;
+        api.getCourseIdsForClass(sessionId, department, level).then((ids) => {
+            if (!cancelled) setAllowedCourseIdsForClass(ids ?? null);
+        });
+        return () => { cancelled = true; };
+    }, [activeSession?.session_id ?? activeSession?.id, department, level]);
+
     // Fetch timetable entries (with session filter and expanded details)
     const fetchTimetable = async () => {
         try {
@@ -374,6 +389,16 @@ export default function LectureScheduler({ activeSession: propsSession, activeSe
                 }
             } catch (_) {}
         }
+        if (validation_result.success && sessionId && class_group_id) {
+            try {
+                const semesterId = activeSemester?.semester_id ?? activeSemester?.id ?? undefined;
+                const dayLimitsRes = await api.checkClassDayLimits(sessionId, Number(class_group_id), day, start_time, endTimeStr, editingId ?? undefined, semesterId);
+                if (dayLimitsRes?.conflict) {
+                    validation_result.success = false;
+                    validation_result.error = (validation_result.error || '') + (dayLimitsRes.message || 'Class day limits exceeded (max 6 hours per day, max 3 hours at a stretch).');
+                }
+            } catch (_) {}
+        }
         if (validation_result.success && sessionId) {
             const classGroupLevel = selectedGroup?.level ?? null;
             try {
@@ -458,6 +483,13 @@ export default function LectureScheduler({ activeSession: propsSession, activeSe
         const groupConflictRes = await api.checkClassGroupTimeConflict(sessionId, Number(class_group_id), day, start_time, endTimeStr, editingId ?? undefined, Number(course_id) || undefined);
         if (groupConflictRes?.conflict) {
             toast.error(groupConflictRes.message || 'This class already has something at this time (including non-computing courses). Choose another time.');
+            return;
+        }
+
+        const semesterIdForDayLimits = activeSemester?.semester_id ?? activeSemester?.id ?? undefined;
+        const dayLimitsRes = await api.checkClassDayLimits(sessionId, Number(class_group_id), day, start_time, endTimeStr, editingId ?? undefined, semesterIdForDayLimits);
+        if (dayLimitsRes?.conflict) {
+            toast.error(dayLimitsRes.message || 'Class day limits exceeded (max 6 hours per day, max 3 hours at a stretch). Choose another day or time.');
             return;
         }
 
@@ -589,6 +621,12 @@ export default function LectureScheduler({ activeSession: propsSession, activeSe
 
     const classGroupsByLevel = level ? classGroups.filter((g) => String(g.level) === String(level)) : classGroups;
     const coursesByLevel = level ? courses.filter((c) => String((c as any).level) === String(level)) : courses;
+    // Class-to-course mapping: only show courses that have been selected for this class in Class to Course Management. If none selected, show no courses.
+    const coursesByLevelFiltered = useMemo(() => {
+        if (allowedCourseIdsForClass === null) return []; // no mapping for this class → show no courses until one is set
+        const idSet = new Set(allowedCourseIdsForClass);
+        return coursesByLevel.filter((c) => idSet.has(Number((c as any).course_id ?? c.id)));
+    }, [coursesByLevel, allowedCourseIdsForClass]);
 
     const isPostSiwesSemester = Boolean(
         activeSemester?.name && String(activeSemester.name).toLowerCase().includes('post-siwes')
@@ -644,7 +682,7 @@ export default function LectureScheduler({ activeSession: propsSession, activeSe
     }, [requiredLecturerIdForCourseGroup, lecturer_id]);
 
     const coursesAvailableForDropdown = useMemo(() => {
-        return coursesByLevel.filter((c) => {
+        return coursesByLevelFiltered.filter((c) => {
             const courseId = Number((c as any).course_id ?? c.id);
             const groupId = Number(class_group_id);
             const key = `${courseId}-${groupId}`;
@@ -667,7 +705,7 @@ export default function LectureScheduler({ activeSession: propsSession, activeSe
             if (atMax) return editingId != null && Number(editingEntryCourseId) === courseId;
             return true;
         });
-    }, [coursesByLevel, class_group_id, scheduledHoursByCourseGroup, isPostSiwesSemester, isSummerSemester, course_id, editingId, editingEntryCourseId]);
+    }, [coursesByLevelFiltered, class_group_id, scheduledHoursByCourseGroup, isPostSiwesSemester, isSummerSemester, course_id, editingId, editingEntryCourseId]);
 
     // Clear course selection when it's no longer in the list (e.g. just reached 2 slots for this class)
     useEffect(() => {

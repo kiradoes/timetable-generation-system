@@ -3,6 +3,7 @@ import {
   Clock,
   GraduationCap,
   LayoutGrid,
+  Link2,
   Users
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
@@ -13,6 +14,7 @@ import { DepartmentCoursesManagement } from './DepartmentCoursesManagement';
 import { DepartmentLecturersManagement } from './DepartmentLecturersManagement';
 import { DepartmentTimetableScheduling } from './DepartmentTimetableScheduling';
 import { DepartmentVenuesManagement } from './DepartmentVenuesManagement';
+import { ClassToCourseManagement } from './ClassToCourseManagement';
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
@@ -116,6 +118,7 @@ export function DepartmentOfficerDashboard({
     { name: 'Lecturer Management', icon: Users, active: activeView === 'lecturers-management', onClick: () => setActiveView('lecturers-management') },
     { name: 'Class Management', icon: LayoutGrid, active: activeView === 'class-management', onClick: () => setActiveView('class-management') },
     { name: 'Course Management', icon: BookOpen, active: activeView === 'courses-management', onClick: () => setActiveView('courses-management') },
+    { name: 'Class to Course Management', icon: Link2, active: activeView === 'class-to-course', onClick: () => setActiveView('class-to-course') },
     { name: 'Schedule Lecture', icon: Clock, active: activeView === 'timetable-scheduling', onClick: () => setActiveView('timetable-scheduling') },
   ];
 
@@ -136,6 +139,8 @@ export function DepartmentOfficerDashboard({
         return <DepartmentClassGroupsManagement departmentName={effectiveDepartment} sessionId={activeSession?.session_id || null} />;
       case 'courses-management':
         return <DepartmentCoursesManagement departmentName={effectiveDepartment} sessionId={activeSession?.session_id || null} />;
+      case 'class-to-course':
+        return <ClassToCourseManagement departmentName={effectiveDepartment} sessionId={activeSession?.session_id || null} role="department-officer" />;
       case 'venues-management':
         return <DepartmentVenuesManagement departmentName={effectiveDepartment} sessionId={activeSession?.session_id || null} />;
       case 'timetable-scheduling':
@@ -169,6 +174,8 @@ function OverviewView({
   activeSemester?: string | null;
   onNavigate?: (view: string) => void;
 }) {
+  const [downloadingCoverage, setDownloadingCoverage] = useState(false);
+
   const sessionSemesterLabel = activeSession
     ? activeSemester
       ? `${activeSession.replace(/-/g, '/')} · ${activeSemester}`
@@ -213,6 +220,65 @@ function OverviewView({
               <Clock className="size-5 text-[#ffb71b]" />
               Quick Actions
             </span>
+            {onNavigate && activeSemester && (
+              <Button
+                variant="outline"
+                className="border-[#0f2044] text-[#0f2044] hover:bg-[#0f2044]/5 text-xs sm:text-sm"
+                onClick={async () => {
+                  if (!activeSemester) {
+                    alert('No active semester selected.');
+                    return;
+                  }
+                  setDownloadingCoverage(true);
+                  try {
+                    // Department-scoped coverage: only this department's class groups and courses
+                    const res = await api.canPublishSemester((activeSemester as any).semester_id ?? (activeSemester as any).id, {
+                      department: userDepartment,
+                    });
+                    if (!res.success || !res.data) {
+                      alert(res.error || 'Unable to generate coverage report.');
+                      return;
+                    }
+                    const missing = Array.isArray(res.data.missing) ? res.data.missing : [];
+                    if (missing.length === 0) {
+                      alert('All required courses in this department have the required hours scheduled for every class. No missing entries to report.');
+                      return;
+                    }
+                    const rows = [
+                      ['Group', 'Course', 'Hours Scheduled', 'Required Hours'],
+                      ...missing.map((m: any) => [
+                        m.group || '',
+                        m.course || '',
+                        String(m.hoursScheduled ?? 0),
+                        String(m.required ?? ''),
+                      ]),
+                    ];
+                    const csv = rows
+                      .map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(','))
+                      .join('\r\n');
+                    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    const semLabel = activeSemester ? String(activeSemester).replace(/\s+/g, '_') : 'semester';
+                    const deptLabel = userDepartment ? userDepartment.replace(/\s+/g, '_') : 'department';
+                    a.download = `coverage_report_${deptLabel}_${semLabel}.csv`;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                  } catch (err) {
+                    console.error('Failed to download coverage report:', err);
+                    alert('Failed to generate coverage report.');
+                  } finally {
+                    setDownloadingCoverage(false);
+                  }
+                }}
+                disabled={downloadingCoverage}
+              >
+                {downloadingCoverage ? 'Preparing Coverage Report…' : 'Download Coverage Report'}
+              </Button>
+            )}
           </CardTitle>
         </CardHeader>
         <CardContent>
